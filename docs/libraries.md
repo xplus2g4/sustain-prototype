@@ -44,7 +44,8 @@ This document justifies every direct dependency, dev-dependency and bundled asse
 | `insta` | `1.49` | `json` | archalign-layout | Layout geometry snapshots | Apache-2.0 | [0029](adr/0029-testing-strategy-and-live-smoke-runs.md) |
 | `proptest` | `1.11` | defaults | archalign-layout | Layout invariant property tests | MIT OR Apache-2.0 | [0029](adr/0029-testing-strategy-and-live-smoke-runs.md) |
 | `iced_test` | `0.14.0` | none (crate has no features) | archalign-desktop | Headless UI `Simulator` | MIT | [0029](adr/0029-testing-strategy-and-live-smoke-runs.md) |
-| `tempfile` | `3.27` | defaults | archalign-repo | Temporary repositories in tests | MIT OR Apache-2.0 | [0029](adr/0029-testing-strategy-and-live-smoke-runs.md) |
+| `tempfile` | `3.27` | defaults | archalign-repo, archalign-desktop | Temporary repositories in tests | MIT OR Apache-2.0 | [0029](adr/0029-testing-strategy-and-live-smoke-runs.md) |
+| `png` | `0.18` | defaults | archalign-desktop | Writes UI-harness screenshots as PNG for visual review | MIT OR Apache-2.0 | [0029](adr/0029-testing-strategy-and-live-smoke-runs.md) |
 
 ### Bundled assets
 
@@ -316,14 +317,25 @@ All four are dev-dependencies only and do not ship in the binary. Test strategy:
 - **Alternatives considered.** Screenshot-diff gates (brittle across font and rendering changes [inference]).
 - **License.** MIT.
 - **Risks and notes.** Text selectors can't find `rich_text` or canvas content, so tests use widget IDs and coordinates.
+  - A `Simulator` is built from one `view()` and drops its widget state (scroll offsets, focus) when rebuilt, and it doesn't run the app's `Task`s. The desktop tests therefore use a small harness (`crates/archalign-desktop/tests/common/`) built on the same parts: `iced_test`'s headless renderer, `iced_test::runtime::UserInterface` with a persisted cache, `iced_test::simulator::{click, tap_key, typewrite}` event builders, and `iced_test::runtime::task::into_stream` to run the real `Task`s (outputs fed back into `update`; widget operations such as `scroll_to` and `is_focused` run against the live UI; clipboard writes are recorded). This mirrors what `iced_test::Emulator` does internally.
 
 ### `tempfile`
 
 - **Version and features.** `3.27` (resolves to 3.27.0), default features. MSRV 1.63.
-- **Used by.** archalign-repo tests.
+- **Used by.** archalign-repo and archalign-desktop tests.
 - **Purpose.** Builds temporary repositories for sandbox escapes (`..`, absolute paths, symlinks out), the deny-list, binary detection, caps, `.gitignore`, watcher filtering and self-write suppression.
 - **Why this one.** Directories are removed on drop. Already in the graph through `notify-debouncer-mini`.
 - **Alternatives considered.** Fixture folders checked into the repo [inference: can't express symlinks out of the root portably].
+- **License.** MIT OR Apache-2.0.
+- **Risks and notes.** None.
+
+### `png`
+
+- **Version and features.** `0.18` (resolves to 0.18.1), default features. MSRV 1.73. Already in the graph through `iced_test`, which uses it for `Snapshot::matches_image`.
+- **Used by.** archalign-desktop tests only.
+- **Purpose.** Encodes the RGBA screenshots taken by the UI harness (`Renderer::screenshot`) as PNG files under `target/smoke/` for visual review (spec §10). `iced_test::Snapshot` can't be built from the harness's persisted UI because its fields are private.
+- **Why this one.** The encoder `iced_test` already uses; no new code enters the build.
+- **Alternatives considered.** `iced_test::Simulator::snapshot` (loses scroll state, see `iced_test` above); a hand-written BMP writer [inference: less convenient to view].
 - **License.** MIT OR Apache-2.0.
 - **Risks and notes.** None.
 

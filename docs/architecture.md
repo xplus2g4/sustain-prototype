@@ -58,9 +58,9 @@ Rules ([0003](adr/0003-cargo-workspace-and-crate-boundaries.md)):
 |---|---|
 | model | serde, serde_json, jsonschema, thiserror |
 | layout | dugong, serde, thiserror |
-| repo | ignore, regex, notify-debouncer-mini, jiff, serde_json, thiserror |
+| repo | ignore, regex, notify-debouncer-mini, jiff, serde, serde_json, thiserror |
 | agent | litellm-rust, reqwest 0.12, tokio, serde_json, thiserror |
-| desktop | iced, syntect, rfd, directories, dotenvy, tokio, tracing-subscriber |
+| desktop | iced, syntect, rfd, directories, dotenvy, tokio, serde, serde_json, tracing-subscriber |
 | all | tracing |
 
 ## 3. Crate responsibilities
@@ -123,31 +123,30 @@ The type names below are the intended public surface. The implementer may refine
 
 **Purpose.** The only crate that touches the filesystem or runs git.
 
-**`Sandbox`.** Holds the canonical root and resolves a `RelPath` (a normalized, `/`-separated newtype) to an absolute path.
-- It rejects absolute paths, `..` escapes, and symlinks that resolve outside the root.
-- UI reads, agent tools and citation checks all go through it ([FR-SEC-01](spec.md#711-fr-sec-security-and-privacy)).
+**`Sandbox` (`sandbox`).** Holds the canonical root (`Arc<PathBuf>`) and resolves a `RelPath` (a normalized, `/`-separated newtype; `""` is the root; parsing rejects absolute paths, drive prefixes, `..`, backslashes and NUL) to a canonical absolute path.
+- `resolve` canonicalizes and checks the root prefix, so symlinks that resolve outside the root are rejected; `is_outside_link` flags such links for the tree.
+- UI reads, agent tools and citation checks all go through it ([FR-SEC-01](spec.md#711-fr-sec-security-and-privacy)). `SandboxError` messages are user-facing (shown in banners).
 
-**`DenyList`.** The fixed agent deny-list ([0025](adr/0025-agent-tool-sandbox-and-deny-list.md)). Only the agent's tool set applies it; the UI doesn't.
+**`DenyList`.** The fixed agent deny-list ([0025](adr/0025-agent-tool-sandbox-and-deny-list.md)). Only the agent's tool set applies it; the UI doesn't. (Added in M5; `RepoProbe::is_denied` returns false until then.)
 
-**`tree`.** Lazy, ignore-aware directory listing for the Tree pane, using the `ignore` crate with folders before files.
+**`tree`.** `list_dir(sandbox, dir, opts)`: one level, `ignore::WalkBuilder` with nested `.gitignore`, `.git/info/exclude` and the global gitignore; `.git` never listed; dotfiles only with `show_hidden`; folders (and links to folders) first, then files, case-insensitively; links are never followed and carry `outside_root`. `is_ignored` applies the same rules to one path (for the watcher).
 
 **`text`.**
-- Size cap and binary sniffing (a NUL byte in the first 8 KB).
-- Lossy UTF-8 decoding.
-- A `LineIndex` for fast access to line ranges.
+- `load_text`: size check from metadata (2 MB cap, `TooLarge`), binary sniffing (a NUL byte in the first 8 KB, `Binary`), lossy UTF-8 decoding with a `lossy` flag.
+- `LineIndex` for line access; out-of-range calls return `""`, never panic.
 
-**`git`.** `GitInfo { head, origin, dirty }`, built from `std::process::Command` with fixed arguments and `--no-optional-locks`.
-- Origin userinfo is stripped.
-- A root that isn't the top of a work tree counts as non-git ([0016](adr/0016-local-folder-import-and-git-metadata-via-cli.md)).
+**`git`.** `collect(root) -> GitStatus` (`Unavailable`, `NotARepo`, `Subfolder`, `Repo(GitInfo { head, origin, dirty })`), from `std::process::Command` with the fixed argument vectors of `read_argv` (each starting with `--no-optional-locks`), no shell, `GIT_TERMINAL_PROMPT=0`.
+- Origin userinfo is stripped (`sanitize_origin`); `GitInfo::repository()` builds `meta.repository` (provider for HTTPS GitHub/Gitee, else `local-only`).
+- A root that isn't the top of a work tree is `Subfolder` and counts as non-git ([0016](adr/0016-local-folder-import-and-git-metadata-via-cli.md)).
 
 **`citations`.**
-- Implements `model::SourceProbe` over `Sandbox` and `LineIndex`.
-- `CitationIndex` maps file → citing nodes and folder → cited-file counts, for tree markers and reverse highlighting.
+- `RepoProbe` implements `model::SourceProbe` over `Sandbox` and the `text` caps; the checks themselves live in `archalign-model::citations::check_citations` (FR-VAL-06/07).
+- `CitationIndex` maps file → citing nodes and folder → cited-file counts, for tree markers and reverse highlighting (M4).
 
 **`storage`.**
-- Run-folder naming (slug, `jiff` local time, collision suffixes) and atomic writes (temp file + rename).
-- `scan_history()` over `.archify/*/`.
-- A `SelfWrites` registry of (path, len, mtime) so the watcher can ignore the app's own writes.
+- `scan_history` lists `.archify/*/candidate.json` newest first (timestamp suffix, then mtime) with a `Valid`/`Invalid`/`Unsupported` status; `newest_valid` picks the one to open on import (FR-IMP-03).
+- `atomic_write`: temp file in the same folder, `sync_all`, rename.
+- Run-folder naming (slug, `jiff` local time, collision suffixes) and a `SelfWrites` registry of (path, len, mtime) for the watcher (M5/M6).
 
 **`watch`.** `RepoWatcher` wraps `notify-debouncer-mini` (300 ms).
 - Filters events with the ignore rules, always keeping `.archify/` and keeping only `.git/HEAD` and `.git/index` under `.git/`.
@@ -193,39 +192,31 @@ It returns accepted, or a list of `Issue`s ([0027](adr/0027-submission-gate-and-
 
 **Purpose.** The iced application and the only crate that knows about windows, input and pixels.
 
-**`App`**, following iced's Elm architecture:
-- **State:** `RepoSession` (`Sandbox`, `GitInfo`, `CitationIndex`), `PaneLayout` (`pane_grid::State<PaneKind>`), `TreeState`, `SourceState`, `DiagramState` (document, `Scene`, camera, selection, reach, finder, problems), `RunState`, `Settings`, `AppStateFile`, theme and banners.
-- **`Message`:** one enum, grouped by area: pane, tree, source, diagram, run, watcher, settings, consent and system.
+The crate is a library (`src/lib.rs`, so tests can drive `App`) plus the `archalign` binary (`src/main.rs`: tracing to stderr, then `archalign_desktop::run`).
 
-**Views:**
-- `toolbar`, `status_bar` and `welcome`;
-- `panes::{tree, diagram, source}`;
-- `modals::{consent, settings}`;
-- the run-log drawer.
+**`App` (`app`)**, following iced's Elm architecture:
+- **State:** `RepoSession` (`Sandbox`, `GitStatus`, history), `PaneLayout`, `TreeState`, `SourceState`, `DiagramState`, `RunState`, recents, Focus text, banners, theme, a `generation` counter (async results from a previous repo are dropped), and the git program (overridable for tests).
+- **`Message`:** one enum. User actions are `Message::Action(Action)`; toolbar buttons and shortcuts send the same `Action` (FR-PANE-09).
+- **Shortcuts:** `keyboard::listen()` delivers key presses no widget captured. `shortcut_action` maps them to an `Action`, disabled actions are dropped, and an `is_focused` check over the visible text fields runs before dispatch, so global shortcuts don't fire while typing (§9).
+- **`Boot`:** last repo, recents, theme and "show hidden files" (filled from `state.json`/`settings.json` in M6).
+- All file-system work runs in `Task::perform` + `spawn_blocking` (`ops`: `open_repo`, `list`, `read_file`, `load_diagram`); results come back as messages.
 
-**`diagram::Canvas`.** An implementation of `canvas::Program`.
-- **Static layer:** a `canvas::Cache` holding the nodes, boundaries, edges and labels. It's cleared only when the scene, theme or camera changes.
-- **Overlay layer:** selection, reach, hover and reverse highlight, redrawn cheaply.
-- Hit testing walks the `Scene` rectangles and edge segments in diagram space.
-- Modifier keys are tracked from `keyboard::Event::ModifiersChanged`, because iced has no pinch events ([0005](adr/0005-iced-native-gui-toolkit.md)).
+**Modules:**
+- `view`: toolbar, Panels/History dropdown strips, welcome screen, `pane_grid` with title bars (name, context label, Maximize/Restore, Close), banners and the status bar;
+- `panes`: `PaneKind`, `PaneLayout` (default configuration, drag/drop via `State::drop`, ratio clamping through pane_grid's own min-size arithmetic, reopen by splitting the largest pane);
+- `tree`: `TreeState` (listed folders, expanded set, selection, pending reveal, citation markers) and its virtualized view;
+- `source`: `SourceState`, citation band and out-of-range rules, `FileHighlighter` (syntect with parse-state checkpoints every 128 lines, highlighting only the window being built), virtualized view;
+- `diagram`: `DiagramState` (empty state with Focus + Archify, loading, failure list, loaded document + `Scene` + warnings); the canvas arrives in M4;
+- `palette`: Archify's dark and light colors, and the iced themes built from them;
+- `fonts`: bundled JetBrains Mono, `ensure_loaded`, and `IcedTextMeasure` (`Paragraph::with_text(…).min_bounds()` through the global font system, so it works on worker threads);
+- `ids`: widget IDs used by the view and by tests;
+- `virtual_list`: the shared window/offset arithmetic ([0009](adr/0009-custom-virtualized-source-viewer.md)). Until a scrollable reports its viewport, the pane's body size is used.
 
-**`virtual_list`.** A shared helper used by the tree and source views ([0009](adr/0009-custom-virtualized-source-viewer.md)).
-- It combines `scrollable`, `on_scroll(Viewport)`, a fixed row height, spacers and overscan.
+**Planned (later milestones):** the `diagram::Canvas` program (`canvas::Program` with a cached static layer and a cheap overlay layer, hit testing in diagram space, ⌘/Ctrl+scroll zoom because iced has no pinch events ([0005](adr/0005-iced-native-gui-toolkit.md))); `persist` (`state.json`, `settings.json`, a serde mirror of the pane layout because `pane_grid::Configuration` has no serde support ([0006](adr/0006-three-pane-grid-layout.md))); `keys` (environment, launch-directory `.env`, config-dir `.env` via `dotenvy::from_path_iter` ([0023](adr/0023-api-key-resolution.md))); modals (consent, settings); the run-log drawer; the watcher subscription.
 
-**`source::Highlighter`.** Runs syntect with the pure-Rust regex backend. Syntax and theme sets load once. Lines are highlighted as they're rendered and then cached.
+**Subscriptions:** keyboard shortcuts and window resizes now; window close (for persistence) and `Subscription::run_with(repo_root, watch_stream)` for watcher batches later.
 
-**`measure::IcedTextMeasure`.** Implements `TextMeasure` with the bundled font, which is loaded through `iced::application(…).font(…)`.
-
-**`persist`.**
-- `state.json` and `settings.json` in the `directories` config dir.
-- A serializable mirror of the pane layout tree, because `pane_grid::Configuration` has no serde support ([0006](adr/0006-three-pane-grid-layout.md)).
-
-**`keys`.** API-key lookup: environment, then the launch-directory `.env`, then the config-dir `.env`, via `dotenvy::from_path_iter` ([0023](adr/0023-api-key-resolution.md)).
-
-**Subscriptions:**
-- keyboard shortcuts;
-- window resize and close (for persistence);
-- `Subscription::run_with(repo_root, watch_stream)` for watcher batches.
+**Tests.** `tests/common/` holds the UI harness ([0032](adr/0032-ui-test-harness-on-iced-test-parts.md)): `iced_test`'s headless renderer and a persisted `UserInterface`, with the app's real tasks executed. Screenshots go to `target/smoke/`.
 
 ## 4. Main flows
 

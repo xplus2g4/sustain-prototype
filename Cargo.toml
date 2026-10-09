@@ -45,6 +45,7 @@ insta = { version = "1.49", features = ["json"] }
 proptest = "1.11"
 iced_test = "0.14.0"
 tempfile = "3.27"
+png = "0.18"
 
 [profile.dev.package."*"]
 opt-level = 2

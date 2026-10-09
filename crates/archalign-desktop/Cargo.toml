@@ -16,3 +16,18 @@ archalign-model.workspace = true
 archalign-layout.workspace = true
 archalign-repo.workspace = true
 archalign-agent.workspace = true
+iced.workspace = true
+syntect.workspace = true
+rfd.workspace = true
+directories.workspace = true
+dotenvy.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+iced_test.workspace = true
+tempfile.workspace = true
+png.workspace = true

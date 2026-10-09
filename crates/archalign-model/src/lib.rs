@@ -5,8 +5,10 @@
 //! - [`document`]: type detection and the Import-profile load pipeline.
 //! - [`submission`]: the Submission profile for agent output (ADR 0027).
 //! - [`edit`]: Re-layout geometry stripping and pretty serialization.
+//! - [`citations`]: citation checks over a [`SourceProbe`] (FR-VAL-06, FR-VAL-07).
 
 pub mod checks;
+pub mod citations;
 pub mod document;
 pub mod edit;
 pub mod issue;
@@ -16,6 +18,7 @@ pub mod submission;
 pub mod types;
 
 pub use checks::Profile;
+pub use citations::{FileProbe, SourceProbe, check_citations, citation_path_ok};
 pub use document::{
     DiagramDocument, DiagramType, LoadFailure, Loaded, load_architecture, load_architecture_value,
 };

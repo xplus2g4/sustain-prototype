@@ -11,7 +11,7 @@ How to use this file ([spec §11–§13](spec.md#11-milestones), [0030](adr/0030
 | M0 Scaffold | Done | see `git log --grep "^M0"` | 2026-10-10 |
 | M1 Model and validation | Done | see `git log --grep "^M1"` | 2026-10-10 |
 | M2 Layout and routing | Done | see `git log --grep "^M2"` | 2026-10-10 |
-| M3 App shell | Not started | — | — |
+| M3 App shell | Done | see `git log --grep "^M3"` | 2026-10-10 |
 | M4 Diagram and navigation | Not started | — | — |
 | M5 Agent | Not started | — | — |
 | M6 History, settings, state, watcher | Not started | — | — |
@@ -55,43 +55,43 @@ How to use this file ([spec §11–§13](spec.md#11-milestones), [0030](adr/0030
 
 ## M3 App shell
 
-- [ ] FR-PANE-01 Default layout
-- [ ] FR-PANE-02 Pane chrome
-- [ ] FR-PANE-03 Move and split
-- [ ] FR-PANE-04 Resize
-- [ ] FR-PANE-05 Maximize
-- [ ] FR-PANE-06 Close and reopen
-- [ ] FR-PANE-07 Reset layout
-- [ ] FR-PANE-09 Toolbar
-- [ ] FR-PANE-10 Status bar
-- [ ] FR-PANE-11 Errors
-- [ ] FR-IMP-01 Welcome screen
-- [ ] FR-IMP-02 Open folder
-- [ ] FR-IMP-03 Initial state
-- [ ] FR-IMP-04 Git metadata
-- [ ] FR-IMP-05 Reopen last repo
-- [ ] FR-IMP-06 One repo per window
-- [ ] FR-TREE-01 Lazy listing
-- [ ] FR-TREE-02 Filtering
-- [ ] FR-TREE-03 Virtualization
-- [ ] FR-TREE-04 Activation
-- [ ] FR-TREE-05 Reveal
-- [ ] FR-TREE-08 Symlinks
-- [ ] FR-SRC-01 Read-only viewer
-- [ ] FR-SRC-02 Rendering
-- [ ] FR-SRC-03 Virtualization
-- [ ] FR-SRC-04 Cited range
-- [ ] FR-SRC-05 Out-of-range citation
-- [ ] FR-SRC-06 Limits
-- [ ] FR-SRC-07 Copy
-- [ ] FR-SRC-08 Confinement
-- [ ] FR-VAL-06 Citation checks
-- [ ] FR-VAL-07 Dirty flags
-- [ ] FR-SEC-01 Root confinement
-- [ ] FR-SEC-07 Origin sanitization
-- [ ] FR-SEC-08 Git invocation
-- [ ] NFR-PERF-01 Top-level listing of 50,000 files < 300 ms
-- [ ] NFR-PERF-02 Opening a 2 MB file < 300 ms
+- [x] FR-PANE-01 Default layout. Evidence: `desktop/tests/shell.rs`::`default_layout_is_tree_diagram_source_at_20_50_30` (title bars left→right, widths 0.20/0.50/0.30 ±1%); `desktop/tests/panes.rs`::`default_layout_shape`.
+- [x] FR-PANE-02 Pane chrome. Evidence: `desktop/tests/shell.rs`::`title_bars_show_name_and_context_and_buttons_emit_messages` (diagram title and source path as context labels; Maximize/Restore/Close emit `PaneMaximize`/`PaneRestore`/`PaneClose`).
+- [x] FR-PANE-03 Move and split. Evidence: `desktop/tests/panes.rs`: `dropping_on_an_edge_region_splits_that_pane_on_that_side`, `dropping_on_a_pane_center_swaps_the_two`, `dropping_on_the_outer_edge_moves_the_pane_to_that_edge` (each compared with `pane_grid::State::drop` on a clone).
+- [x] FR-PANE-04 Resize. Evidence: `desktop/tests/panes.rs`: `resize_updates_the_ratio`, `no_pane_goes_below_160px_in_either_dimension` (ratios 0…1, incl. a nested split).
+- [x] FR-PANE-05 Maximize. Evidence: `desktop/tests/shell.rs`::`maximize_fills_the_grid_and_restore_returns`; `desktop/tests/panes.rs`::`dragging_is_ignored_while_maximized`.
+- [x] FR-PANE-06 Close and reopen. Evidence: `desktop/tests/shell.rs`: `close_and_reopen_through_the_panels_menu` (☐/☑ visibility, Tree reinserted left, Source right), `the_last_visible_pane_cannot_be_closed` (disabled button, at most one of each).
+- [x] FR-PANE-07 Reset layout. Evidence: `desktop/tests/shell.rs`::`reset_restores_the_default_arrangement_and_clears_maximize` (menu and ⌘⇧0).
+- [x] FR-PANE-09 Toolbar. Evidence: `desktop/tests/shell.rs`: `archify_is_disabled_without_a_repo`, `open_repo_is_disabled_during_a_run`, `each_shortcut_triggers_the_same_action_as_its_button` (theme, history, settings, archify, panels, reset; ⌘2/⌘3/⌘R/⌘⇧L), `global_shortcuts_do_not_fire_inside_a_focused_text_field`. Archify/Cancel/Settings/Refresh/Re-layout handlers are completed in M4–M6.
+- [x] FR-PANE-10 Status bar. Evidence: `desktop/tests/shell.rs`::`status_bar_shows_repo_git_run_and_watcher` (root path, `git <short> · 1 dirty`, Idle → `Turn 3/40 · 12345 input tokens · 1:15`, "Manual refresh only" until the M6 watcher).
+- [x] FR-PANE-11 Errors (missing API key part: M5). Evidence: `desktop/tests/shell.rs`: `errors_show_as_dismissible_banners_and_in_the_status_bar` (malformed JSON), `missing_git_unreadable_files_and_bad_utf8_give_banners_not_panics`.
+- [x] FR-IMP-01 Welcome screen. Evidence: `desktop/tests/shell.rs`: `welcome_lists_recents_and_marks_missing_ones` ("Missing", disabled, Remove), `welcome_keeps_at_most_ten_recents_most_recent_first`.
+- [x] FR-IMP-02 Open folder (`[unit]`; the rfd picker itself is `[manual]`, owner check). Evidence: `desktop/tests/shell.rs`::`opening_a_repo_sets_the_root_and_resets_state`.
+- [x] FR-IMP-03 Initial state. Evidence: `desktop/tests/shell.rs`: `the_newer_valid_diagram_opens_on_import` (newer valid of two; newest invalid skipped), `without_diagrams_the_empty_state_shows_focus_and_archify`; `repo/tests/storage.rs`.
+- [x] FR-IMP-04 Git metadata. Evidence: `repo/tests/git.rs`: clean, dirty (modified/untracked/renamed), no origin, origin with credentials, subfolder of a work tree, git missing; plus status-bar rendering in `desktop/tests/shell.rs`.
+- [x] FR-IMP-05 Reopen last repo. Evidence: `desktop/tests/shell.rs`::`last_repo_reopens_at_launch_if_it_exists` (and welcome when it's gone). `state.json` loading comes in M6.
+- [x] FR-IMP-06 One repo per window. Evidence: `desktop/tests/shell.rs`::`another_repo_cannot_be_opened_while_a_run_is_active`, `open_repo_is_disabled_during_a_run`.
+- [x] FR-TREE-01 Lazy listing. Evidence: `desktop/tests/browse.rs`: `folders_come_first_then_files_case_insensitively`, `a_folder_is_listed_on_first_expansion_off_the_ui_thread`; `repo/tests/tree.rs`.
+- [x] FR-TREE-02 Filtering. Evidence: `repo/tests/tree.rs` (nested .gitignore, info/exclude, `.git`, dotfiles); `desktop/tests/browse.rs`::`ignored_files_git_and_dotfiles_are_hidden_unless_enabled`.
+- [x] FR-TREE-03 Virtualization. Evidence: `virtual_list::tests::window_is_visible_plus_overscan_whatever_the_size`; `desktop/tests/browse.rs`::`only_visible_rows_plus_overscan_are_built` (5,000-file folder: ≤ visible + 40 rows built, before and after scrolling).
+- [x] FR-TREE-04 Activation. Evidence: `desktop/tests/browse.rs`::`clicking_a_file_opens_it_and_selects_it_and_folders_toggle`.
+- [x] FR-TREE-05 Reveal. Evidence: `desktop/tests/browse.rs`::`reveal_expands_ancestors_selects_and_scrolls_into_view` (3 nested folders listed on demand, row inside the scroll viewport). Node-click wiring in M4.
+- [x] FR-TREE-08 Symlinks. Evidence: `repo/tests/tree.rs`::`symlinks_are_marked_with_outside_flag`; `desktop/tests/browse.rs`::`symlinks_show_a_marker_and_outside_links_cannot_be_opened` (↗ marker, outside links disabled, tooltip in `target/smoke/m3/outside-link-tooltip.png`).
+- [x] FR-SRC-01 Read-only viewer. Evidence: `desktop/tests/browse.rs`::`the_viewer_is_read_only`.
+- [x] FR-SRC-02 Rendering. Evidence: `desktop/tests/browse.rs`: `syntax_is_chosen_by_extension_then_first_line`, `long_lines_scroll_horizontally_without_wrapping`.
+- [x] FR-SRC-03 Virtualization. Evidence: `desktop/tests/browse.rs`::`only_visible_lines_plus_overscan_are_built` (50,000 lines, jump to 30,000).
+- [x] FR-SRC-04 Cited range. Evidence: `desktop/tests/browse.rs`::`opening_a_citation_bands_the_range_and_puts_it_in_the_top_third` (band 50–60, line 50 in the top third, band kept while scrolling, `line` only, no line → top, no band); screenshot `target/smoke/m3/cited-range.png`.
+- [x] FR-SRC-05 Out-of-range citation. Evidence: `desktop/tests/browse.rs`::`an_out_of_range_citation_opens_at_line_1_with_a_banner` ("Cited lines 100–120 are outside this file (40 lines)").
+- [x] FR-SRC-06 Limits. Evidence: `repo/tests/text.rs` (2 MB boundary, NUL sniff, lossy); `desktop/tests/browse.rs`::`large_and_binary_files_show_a_placeholder_and_invalid_utf8_a_banner`.
+- [x] FR-SRC-07 Copy. Evidence: `desktop/tests/browse.rs`::`copy_path_line_and_cited_lines` (clipboard `src/api.rs`, `src/api.rs:10`, lines 10–12; disabled without a band).
+- [x] FR-SRC-08 Confinement. Evidence: `repo/tests/text.rs`::`reads_go_through_the_sandbox`; `desktop/tests/browse.rs`::`reads_are_confined_to_the_root` (symlink to an outside file → error, contents never shown).
+- [x] FR-VAL-06 Citation checks. Evidence: `model/tests/citations.rs` (positive + negative per rule), `repo/tests/citations.rs`::`repo_probe_end_to_end`; `desktop/tests/shell.rs`::`opened_diagrams_carry_citation_and_dirty_warnings`.
+- [x] FR-VAL-07 Dirty flags. Evidence: `model/tests/citations.rs::dirty_cited_path_is_a_warning_under_both_profiles`; `desktop/tests/shell.rs`::`opened_diagrams_carry_citation_and_dirty_warnings`.
+- [x] FR-SEC-01 Root confinement. Evidence: `repo/tests/sandbox.rs`: `dot_dot_escape_is_rejected`, `absolute_path_is_rejected`, `symlink_to_file_outside_is_rejected`, `symlink_to_folder_outside_is_rejected`, `sibling_with_shared_prefix_is_outside`.
+- [x] FR-SEC-07 Origin sanitization. Evidence: `repo/tests/git.rs`: `sanitize_strips_https_userinfo_and_keeps_the_rest`, `sanitize_leaves_ssh_and_scp_style_untouched`, `origin_with_credentials_is_sanitized`.
+- [x] FR-SEC-08 Git invocation. Evidence: `repo/tests/git.rs`::`read_commands_are_fixed_argv_with_no_optional_locks_first` (`std::process::Command` with fixed argv, no shell).
+- [x] NFR-PERF-01 Top-level listing of 50,000 files < 300 ms. Evidence: `perf_top_level_listing_50k_files`: median 0.46 ms.
+- [x] NFR-PERF-02 Opening a 2 MB file < 300 ms. Evidence: `desktop/tests/perf.rs::perf_open_2mb_file_read_index_and_highlight_first_window`: median 6.2 ms (read + index + highlight 80 lines); `repo` read + index alone: 2.6 ms.
 
 ## M4 Diagram and navigation
 
@@ -185,3 +185,9 @@ How to use this file ([spec §11–§13](spec.md#11-milestones), [0030](adr/0030
   - Property testing found that many self-loops on one node could reach the next rank. Loop nesting is now capped at 3.
   - Visual check of all 24 fixtures (authored and auto), rendered to throwaway SVGs under `target/smoke/layout-svg/`.
   - Gates: fmt, clippy `-D warnings`, `cargo test --workspace` all green; perf: 13.4 ms median.
+- **2026-10-10. M3 App shell.**
+  - `archalign-repo` (built by a subagent against a fixed contract, then integrated): `Sandbox`/`RelPath`, ignore-aware `tree`, `text` (2 MB cap, binary sniff, lossy, `LineIndex`), `git` (fixed argv, sanitized origin), `RepoProbe`, `storage::scan_history`/`atomic_write`. `archalign-model::citations` (FR-VAL-06/07).
+  - `archalign-desktop`: iced app with toolbar, Panels menu, welcome screen, pane grid, status bar, banners, virtualized tree and source viewer (syntect with checkpoints), and auto-opening of the newest valid diagram (canvas in M4).
+  - ADR 0032: a UI harness built from `iced_test` parts. A bare `Simulator` loses scroll state and doesn't run tasks; evidence in the ADR. Added `png` 0.18 as a dev-dependency to save screenshots (`libraries.md`).
+  - Screenshots reviewed: `target/smoke/m3/{open,default-layout,cited-range,outside-link-tooltip,status-bar,empty-state,after-recent}.png`.
+  - Gates: fmt, clippy `-D warnings`, `cargo test --workspace` all green; perf: NFR-PERF-01 0.46 ms, NFR-PERF-02 6.2 ms, NFR-PERF-03 14.1 ms.

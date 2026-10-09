@@ -62,3 +62,4 @@ Paths and URLs from this brief only.
 | 0029 | [Testing strategy and live smoke runs](0029-testing-strategy-and-live-smoke-runs.md) | Accepted |
 | 0030 | [Long-running implementation process](0030-long-running-implementation-process.md) | Accepted |
 | 0031 | [dugong placement plus one grid A* orthogonal router](0031-dugong-placement-and-grid-astar-router.md) | Accepted |
+| 0032 | [UI test harness built on `iced_test` parts](0032-ui-test-harness-on-iced-test-parts.md) | Accepted (refines the desktop part of 0029) |
