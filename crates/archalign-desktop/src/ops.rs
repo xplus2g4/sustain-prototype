@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use archalign_layout::{Scene, layout_document};
+use archalign_layout::{Scene, layout_document, write_back};
 use archalign_model::citations::check_citations;
 use archalign_model::{ArchitectureDoc, Issue, Profile};
 use archalign_repo::citations::RepoProbe;
@@ -155,4 +155,53 @@ pub fn finish_diagram(
         scene: Arc::new(scene),
         warnings,
     }
+}
+
+/// The failure reported when a background job was dropped before it finished.
+pub fn interrupted_failure(rel: RelPath) -> DiagramFailed {
+    DiagramFailed {
+        rel,
+        errors: vec![Issue::error(
+            archalign_model::IssueCode::Json,
+            "",
+            "the operation was interrupted",
+        )],
+        unsupported: None,
+    }
+}
+
+/// Re-layout (FR-DIA-11, ADR 0019): strip geometry, lay out, write integer `pos`/`size`
+/// back, save `candidate.json` atomically, then reload the saved bytes through the Import
+/// profile so the view matches the file.
+pub fn relayout(
+    sandbox: &Sandbox,
+    rel: &RelPath,
+    mut doc: ArchitectureDoc,
+    dirty: &HashSet<String>,
+) -> Result<DiagramLoaded, DiagramFailed> {
+    archalign_model::strip_geometry(&mut doc);
+    let scene = layout_document(&doc, &IcedTextMeasure);
+    write_back(&mut doc, &scene);
+    let bytes = archalign_model::to_pretty_json(&doc);
+    archalign_repo::storage::atomic_write(sandbox, rel, &bytes).map_err(|e| DiagramFailed {
+        rel: rel.clone(),
+        errors: vec![Issue::error(
+            archalign_model::IssueCode::Json,
+            "",
+            format!("Can't save {rel}: {e}"),
+        )],
+        unsupported: None,
+    })?;
+    let loaded = archalign_model::load_architecture(&bytes).map_err(|f| DiagramFailed {
+        rel: rel.clone(),
+        errors: f.errors,
+        unsupported: None,
+    })?;
+    Ok(finish_diagram(
+        sandbox,
+        rel.clone(),
+        loaded.doc,
+        loaded.warnings,
+        dirty,
+    ))
 }

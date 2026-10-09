@@ -12,7 +12,7 @@ How to use this file ([spec §11–§13](spec.md#11-milestones), [0030](adr/0030
 | M1 Model and validation | Done | see `git log --grep "^M1"` | 2026-10-10 |
 | M2 Layout and routing | Done | see `git log --grep "^M2"` | 2026-10-10 |
 | M3 App shell | Done | see `git log --grep "^M3"` | 2026-10-10 |
-| M4 Diagram and navigation | Not started | — | — |
+| M4 Diagram and navigation | Done | see `git log --grep "^M4"` | 2026-10-10 |
 | M5 Agent | Not started | — | — |
 | M6 History, settings, state, watcher | Not started | — | — |
 | M7 Finish | Not started | — | — |
@@ -95,19 +95,19 @@ How to use this file ([spec §11–§13](spec.md#11-milestones), [0030](adr/0030
 
 ## M4 Diagram and navigation
 
-- [ ] FR-DIA-01 Rendering
-- [ ] FR-DIA-02 Camera
-- [ ] FR-DIA-03 Node click
-- [ ] FR-DIA-04 Hover
-- [ ] FR-DIA-05 Reach
-- [ ] FR-DIA-06 Edge click
-- [ ] FR-DIA-07 Finder
-- [ ] FR-DIA-08 Esc
-- [ ] FR-DIA-09 Problems
-- [ ] FR-DIA-11 Re-layout
-- [ ] FR-TREE-06 Citation markers
-- [ ] FR-TREE-07 Reverse highlight
-- [ ] NFR-PERF-04 Canvas geometry for 100 nodes < 8 ms
+- [x] FR-DIA-01 Rendering. Evidence: `diagram::logic::tests::legend_modes_and_overrides` (auto/all/hidden, label override, `visible: false`); `[manual]` part reviewed from `desktop/tests/diagram.rs`::`fixture_screenshots_for_visual_review` → `target/smoke/m4/{web-app,production-deployment,archify-repo-grid,archify-runtime}.png` (boundaries, variants, labels, legend, cards strip); the owner's manual check is pending.
+- [x] FR-DIA-02 Camera. Evidence: `diagram::camera::tests` (`zoom_about_keeps_the_anchor_fixed`, `zoom_is_clamped_to_10_and_400_percent`, `fit_centers_with_40px_padding`, `round_trip`); `desktop/tests/diagram.rs`: `opening_fits_the_diagram_with_padding`, `zoom_and_pan_inputs_work_end_to_end` (keys need focus; +/−/0/F; ⌘+wheel about the cursor; wheel and drag pan).
+- [x] FR-DIA-03 Node click. Evidence: `desktop/tests/diagram.rs`: `clicking_a_node_opens_its_first_citation_and_reveals_the_file` (click by `Point`, band 3–3 and 10–20, ancestors expanded, row selected), `a_node_without_sources_is_only_selected` ("No source"), `strip_sources_open_their_citation`.
+- [x] FR-DIA-04 Hover. Evidence: `desktop/tests/diagram.rs`::`hovering_a_node_shows_a_tooltip_after_400ms` (≥ 400 ms, label/sublabel/tag/sources, hides on leave).
+- [x] FR-DIA-05 Reach. Evidence: `diagram::logic::tests::{downstream_reach_follows_edges_and_handles_cycles, upstream_reach_follows_edges_backwards}`; `desktop/tests/diagram.rs`::`reach_keys_and_buttons_toggle_and_replace`.
+- [x] FR-DIA-06 Edge click. Evidence: `desktop/tests/diagram.rs`::`clicking_a_connection_selects_it` ("ui → api · calls · default", endpoints outlined).
+- [x] FR-DIA-07 Finder. Evidence: `logic::tests::finder_matches_labels_and_ids_case_insensitively_up_to_ten`; `desktop/tests/diagram.rs`::`finder_searches_moves_and_picks` (⌘F and `/`, ↑/↓, Enter centers and clicks).
+- [x] FR-DIA-08 Esc. Evidence: `desktop/tests/diagram.rs`: `finder_searches_moves_and_picks` (first Esc closes the finder only), `escape_clears_reach_selection_and_reverse_highlight`.
+- [x] FR-DIA-09 Problems. Evidence: `logic::tests::badges_come_from_citation_warnings`; `desktop/tests/diagram.rs`::`problems_list_and_badges` (broken and modified badges, Problems (n) list).
+- [x] FR-DIA-11 Re-layout. Evidence: `desktop/tests/diagram.rs`::`opening_never_writes_and_relayout_writes_integer_geometry_only` (title-bar button and ⌘⇧L; integer pos/size; non-geometry fields equal; also the app-level FR-LAY-08 check: opening leaves the bytes unchanged).
+- [x] FR-TREE-06 Citation markers. Evidence: `repo/tests/citations.rs::citation_index_maps_files_folders_and_broken_markers`; `desktop/tests/diagram.rs`::`tree_markers_show_cited_files_folder_counts_and_broken_files` (● dot, folder count, ⚠).
+- [x] FR-TREE-07 Reverse highlight. Evidence: `desktop/tests/diagram.rs`: `selecting_a_file_highlights_the_nodes_citing_it` (two citing nodes; another file clears), `escape_clears_reach_selection_and_reverse_highlight`.
+- [x] NFR-PERF-04 Canvas geometry for 100 nodes < 8 ms. Evidence: `desktop/tests/perf.rs::perf_canvas_geometry_for_100_nodes_under_8ms`: median 0.40 ms (both layers, 150 edges, reach + selection + reverse + hover active).
 
 ## M5 Agent
 
@@ -191,3 +191,8 @@ How to use this file ([spec §11–§13](spec.md#11-milestones), [0030](adr/0030
   - ADR 0032: a UI harness built from `iced_test` parts. A bare `Simulator` loses scroll state and doesn't run tasks; evidence in the ADR. Added `png` 0.18 as a dev-dependency to save screenshots (`libraries.md`).
   - Screenshots reviewed: `target/smoke/m3/{open,default-layout,cited-range,outside-link-tooltip,status-bar,empty-state,after-recent}.png`.
   - Gates: fmt, clippy `-D warnings`, `cargo test --workspace` all green; perf: NFR-PERF-01 0.46 ms, NFR-PERF-02 6.2 ms, NFR-PERF-03 14.1 ms.
+- **2026-10-10. M4 Diagram and navigation.**
+  - Canvas (`diagram::canvas`) with a cached static layer and an overlay layer, camera math, hit testing, hover tooltip (pinned widget, 400 ms task), reach, finder, Esc, problems/badges, cards strip, Re-layout with atomic save, tree markers and reverse highlight (`CitationIndex` in `archalign-repo`).
+  - Keyboard path changed to `event::listen_with` (keys carry their capture status) so Esc can close the finder even when the field captured it; the harness forwards the same status.
+  - Screenshots reviewed: `target/smoke/m4/{web-app,production-deployment,archify-repo-grid,archify-runtime,node-click,tooltip,reach,edge-click,problems,tree-markers,reverse-highlight}.png`.
+  - Gates: fmt, clippy `-D warnings`, `cargo test --workspace` green; perf: NFR-PERF-04 0.40 ms (others unchanged).

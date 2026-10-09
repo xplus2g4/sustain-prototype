@@ -8,11 +8,14 @@ use archalign_repo::storage::{self, HistoryEntry};
 use archalign_repo::text::TextLoad;
 use archalign_repo::tree::DirEntry;
 use archalign_repo::{RelPath, Sandbox};
+use iced::event;
 use iced::keyboard::{self, Key, Modifiers, key::Named};
 use iced::widget::{Id, operation, pane_grid, scrollable};
 use iced::{Size, Subscription, Task};
 
-use crate::diagram::{DiagramContent, DiagramState};
+use crate::diagram::canvas::{CanvasEvent, Hit};
+use crate::diagram::logic::Direction;
+use crate::diagram::{DiagramContent, DiagramMsg, DiagramState, Hover, Selection};
 use crate::ids;
 use crate::ops::{self, DiagramFailed, DiagramLoaded, RepoOpened};
 use crate::palette::ThemeChoice;
@@ -31,6 +34,15 @@ pub const TOOLBAR_H: f32 = 44.0;
 pub const STATUS_H: f32 = 26.0;
 /// Height of a pane title bar.
 pub const TITLE_H: f32 = 30.0;
+/// Height reserved for the diagram detail strip when estimating the canvas size.
+pub const DETAIL_STRIP_H: f32 = 64.0;
+/// Hover delay before a node tooltip shows (Appendix C, Tunable).
+pub const HOVER_DELAY: std::time::Duration = std::time::Duration::from_millis(400);
+
+fn camera_step() -> f32 {
+    crate::diagram::camera::ZOOM_STEP
+}
+
 /// Height of the source header row.
 pub const SOURCE_HEADER_H: f32 = 30.0;
 /// Default window size (Appendix C, Tunable).
@@ -210,8 +222,12 @@ pub struct Boot {
 pub enum Message {
     /// A user action (button or shortcut).
     Action(Action),
-    /// A key press not captured by a widget.
-    KeyPressed(Key, Modifiers),
+    /// A key press; `captured` is true when a widget (e.g. a focused text field) used it.
+    KeyPressed(Key, Modifiers, bool),
+    /// An event from the diagram canvas.
+    Canvas(CanvasEvent),
+    /// A diagram-pane message.
+    Diagram(DiagramMsg),
     /// A shortcut after checking whether a text field has focus.
     ShortcutResolved(Action, bool),
     /// The folder picker closed.
@@ -463,10 +479,21 @@ impl App {
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Action(action) => self.perform(action),
-            Message::KeyPressed(key, modifiers) => {
+            Message::KeyPressed(key, modifiers, captured) => {
+                if let Some(task) = self.finder_key(&key, captured) {
+                    return task;
+                }
+                if captured {
+                    return Task::none();
+                }
                 if key == Key::Named(Named::Escape) && self.menu.is_some() {
                     self.menu = None;
                     return Task::none();
+                }
+                if self.diagram.focused
+                    && let Some(task) = self.diagram_key(&key, modifiers)
+                {
+                    return task;
                 }
                 let Some(action) =
                     shortcut_action(&key, modifiers).filter(|a| self.action_enabled(*a))
@@ -554,6 +581,12 @@ impl App {
             Message::TreeToggle(rel) => self.tree_toggle(rel),
             Message::TreeActivate(rel) => {
                 self.tree.selected = Some(rel.clone());
+                // FR-TREE-07: highlight the nodes citing this file (or clear).
+                self.diagram.reverse = self
+                    .diagram
+                    .view()
+                    .map(|v| v.index.nodes_citing(rel.as_str()).iter().copied().collect())
+                    .unwrap_or_default();
                 self.update(Message::OpenFile(rel, None))
             }
             Message::TreeListed(generation, dir, result) => {
@@ -618,6 +651,8 @@ impl App {
                 self.diagram_loaded(result);
                 Task::none()
             }
+            Message::Canvas(event) => self.canvas_event(event),
+            Message::Diagram(msg) => self.diagram_msg(msg),
             Message::DismissBanner(id) => {
                 self.banners.retain(|b| b.id != id);
                 if self.banners.is_empty() {
@@ -679,13 +714,11 @@ impl App {
                 };
                 Task::none()
             }
-            // Wired in later milestones: Archify/Cancel (M5), Settings and Refresh (M6),
-            // Re-layout (M4).
-            Action::Archify
-            | Action::CancelRun
-            | Action::Settings
-            | Action::Refresh
-            | Action::Relayout => Task::none(),
+            Action::Relayout => self.relayout(),
+            // Wired in later milestones: Archify/Cancel (M5), Settings and Refresh (M6).
+            Action::Archify | Action::CancelRun | Action::Settings | Action::Refresh => {
+                Task::none()
+            }
         }
     }
 
@@ -988,7 +1021,15 @@ impl App {
     fn diagram_loaded(&mut self, result: Result<Box<DiagramLoaded>, Box<DiagramFailed>>) {
         match result {
             Ok(d) => {
-                self.diagram.content = DiagramContent::Loaded(*d);
+                let fallback = self.canvas_estimate();
+                self.diagram.set_loaded(*d, fallback);
+                if let Some(v) = self.diagram.view() {
+                    self.tree.markers = tree::Markers {
+                        cited: v.index.by_file.keys().cloned().collect(),
+                        folder_counts: v.index.folder_counts.clone().into_iter().collect(),
+                        broken: v.index.broken_files.iter().cloned().collect(),
+                    };
+                }
             }
             Err(f) => {
                 let msg = match &f.unsupported {
@@ -1008,13 +1049,233 @@ impl App {
         }
     }
 
+    /// Estimated canvas size before the canvas reports one.
+    pub fn canvas_estimate(&self) -> Size {
+        let s = self.pane_body_size(PaneKind::Diagram);
+        Size::new(s.width, (s.height - DETAIL_STRIP_H).max(1.0))
+    }
+
+    /// Keys while the finder is open: ↑/↓ move, Esc closes (even when the field used it).
+    fn finder_key(&mut self, key: &Key, captured: bool) -> Option<Task<Message>> {
+        self.diagram.finder.as_ref()?;
+        match key {
+            Key::Named(Named::Escape) => {
+                self.diagram.finder = None;
+                Some(Task::none())
+            }
+            Key::Named(Named::ArrowDown) if !captured => {
+                self.diagram.move_cursor(1);
+                Some(Task::none())
+            }
+            Key::Named(Named::ArrowUp) if !captured => {
+                self.diagram.move_cursor(-1);
+                Some(Task::none())
+            }
+            _ => None,
+        }
+    }
+
+    /// Diagram-scoped shortcuts (§9); only while the canvas has focus.
+    fn diagram_key(&mut self, key: &Key, modifiers: Modifiers) -> Option<Task<Message>> {
+        self.diagram.view()?;
+        let fallback = self.canvas_estimate();
+        if let Key::Named(Named::Escape) = key {
+            self.diagram.escape();
+            return Some(Task::none());
+        }
+        let Key::Character(c) = key.as_ref() else {
+            return None;
+        };
+        let c = c.to_lowercase();
+        match (c.as_str(), modifiers.command()) {
+            ("f", true) | ("/", false) => {
+                self.diagram.set_query(String::new());
+                return Some(operation::focus(ids::FINDER_INPUT));
+            }
+            (_, true) => return None,
+            ("+" | "=", false) => self.diagram.zoom_center(camera_step(), fallback),
+            ("-" | "_", false) => self.diagram.zoom_center(1.0 / camera_step(), fallback),
+            ("0", false) => self.diagram.zoom_reset(fallback),
+            ("f", false) => self.diagram.fit(fallback),
+            ("u", false) => self.diagram.toggle_reach(Direction::Upstream),
+            ("d", false) => self.diagram.toggle_reach(Direction::Downstream),
+            _ => return None,
+        }
+        Some(Task::none())
+    }
+
+    fn canvas_event(&mut self, event: CanvasEvent) -> Task<Message> {
+        let fallback = self.canvas_estimate();
+        match event {
+            CanvasEvent::Pressed(hit) => {
+                self.diagram.focused = true;
+                match hit {
+                    Hit::Node(i) => return self.click_node(i),
+                    Hit::Edge(k) => {
+                        self.diagram.selection = Selection::Edge(k);
+                        self.diagram.reach = None;
+                    }
+                    Hit::Empty => {}
+                }
+                Task::none()
+            }
+            CanvasEvent::Unfocused => {
+                self.diagram.focused = false;
+                Task::none()
+            }
+            CanvasEvent::Pan(d) => {
+                self.diagram.camera.pan_by(d);
+                self.diagram.fitted = false;
+                Task::none()
+            }
+            CanvasEvent::ZoomAt { factor, anchor } => {
+                self.diagram.camera.zoom_about(factor, anchor);
+                self.diagram.fitted = false;
+                Task::none()
+            }
+            CanvasEvent::Hover(Some(node), at) => {
+                self.diagram.hover = Some(Hover {
+                    node,
+                    at,
+                    shown: false,
+                });
+                Task::perform(async { tokio::time::sleep(HOVER_DELAY).await }, move |_| {
+                    Message::Diagram(DiagramMsg::HoverElapsed(node))
+                })
+            }
+            CanvasEvent::Hover(None, _) => {
+                self.diagram.hover = None;
+                Task::none()
+            }
+            CanvasEvent::Resized(size) => {
+                self.diagram.canvas_size = Some(size);
+                if self.diagram.fitted {
+                    self.diagram.fit(fallback);
+                }
+                Task::none()
+            }
+        }
+    }
+
+    /// FR-DIA-03: select, open `sources[0]`, reveal the file in the tree.
+    pub fn click_node(&mut self, i: usize) -> Task<Message> {
+        self.diagram.selection = Selection::Node(i);
+        if self
+            .diagram
+            .reach
+            .as_ref()
+            .is_some_and(|(_, r)| !r.nodes.contains(&i))
+        {
+            self.diagram.reach = None;
+        }
+        self.open_node_source(i, 0)
+    }
+
+    fn open_node_source(&mut self, i: usize, j: usize) -> Task<Message> {
+        let Some(src) = self
+            .diagram
+            .loaded()
+            .and_then(|d| d.doc.components.get(i))
+            .and_then(|c| c.sources().get(j))
+            .cloned()
+        else {
+            return Task::none();
+        };
+        let Ok(rel) = RelPath::parse(&src.path) else {
+            self.banner(
+                Some(PaneKind::Source),
+                Level::Warning,
+                format!("{} is not a valid repository path", src.path),
+            );
+            return Task::none();
+        };
+        let cite = Cite {
+            line: src.line,
+            end_line: src.end_line,
+        };
+        let open = self.open_file(rel.clone(), Some(cite));
+        let reveal = self.reveal(rel);
+        Task::batch([open, reveal])
+    }
+
+    fn diagram_msg(&mut self, msg: DiagramMsg) -> Task<Message> {
+        let fallback = self.canvas_estimate();
+        match msg {
+            DiagramMsg::OpenSource(i, j) => self.open_node_source(i, j),
+            DiagramMsg::Reach(dir) => {
+                self.diagram.toggle_reach(dir);
+                Task::none()
+            }
+            DiagramMsg::FinderQuery(q) => {
+                self.diagram.set_query(q);
+                Task::none()
+            }
+            DiagramMsg::FinderSubmit => {
+                let pick = self
+                    .diagram
+                    .finder
+                    .as_ref()
+                    .and_then(|f| f.results.get(f.cursor).copied());
+                match pick {
+                    Some(i) => self.diagram_msg(DiagramMsg::FinderPick(i)),
+                    None => Task::none(),
+                }
+            }
+            DiagramMsg::FinderPick(i) => {
+                self.diagram.finder = None;
+                self.diagram.focused = true;
+                self.diagram.center_node(i, fallback);
+                self.click_node(i)
+            }
+            DiagramMsg::ToggleCards => {
+                self.diagram.cards_open = !self.diagram.cards_open;
+                Task::none()
+            }
+            DiagramMsg::ToggleProblems => {
+                self.diagram.problems_open = !self.diagram.problems_open;
+                Task::none()
+            }
+            DiagramMsg::HoverElapsed(node) => {
+                if let Some(h) = &mut self.diagram.hover
+                    && h.node == node
+                {
+                    h.shown = true;
+                }
+                Task::none()
+            }
+        }
+    }
+
+    /// FR-DIA-11: strip geometry, lay out again, save atomically, redraw.
+    fn relayout(&mut self) -> Task<Message> {
+        if !self.action_enabled(Action::Relayout) {
+            return Task::none();
+        }
+        let (Some(repo), Some(d)) = (self.repo.as_ref(), self.diagram.loaded()) else {
+            return Task::none();
+        };
+        let sandbox = repo.sandbox.clone();
+        let dirty = repo.dirty();
+        let rel = d.rel.clone();
+        let doc = (*d.doc).clone();
+        let generation = self.generation;
+        let rel2 = rel.clone();
+        Task::perform(
+            ops::blocking(move || ops::relayout(&sandbox, &rel, doc, &dirty)),
+            move |r| {
+                let r = r.unwrap_or_else(|| Err(ops::interrupted_failure(rel2.clone())));
+                Message::DiagramLoaded(generation, r.map(Box::new).map_err(Box::new))
+            },
+        )
+    }
+
     /// Subscriptions: keyboard shortcuts and window resizes.
     pub fn subscription(&self) -> Subscription<Message> {
         Subscription::batch([
-            keyboard::listen().filter_map(|event| match event {
-                keyboard::Event::KeyPressed { key, modifiers, .. } => {
-                    Some(Message::KeyPressed(key, modifiers))
-                }
+            event::listen_with(|event, status, _window| match event {
+                iced::Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => Some(
+                    Message::KeyPressed(key, modifiers, status == event::Status::Captured),
+                ),
                 _ => None,
             }),
             iced::window::resize_events().map(|(_, size)| Message::WindowResized(size)),

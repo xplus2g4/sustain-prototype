@@ -99,3 +99,30 @@ pub fn recent_remove(i: usize) -> Id {
 pub fn banner_dismiss(id: u64) -> Id {
     Id::from(format!("banner-dismiss:{id}"))
 }
+
+/// Diagram title bar: Re-layout.
+pub const RELAYOUT: Id = Id::new("diagram-relayout");
+/// Diagram detail strip: "No source".
+pub const DETAIL_NO_SOURCE: Id = Id::new("detail-no-source");
+/// Diagram detail strip: the selected connection.
+pub const DETAIL_EDGE: Id = Id::new("detail-edge");
+/// Diagram detail strip: Upstream.
+pub const REACH_UP: Id = Id::new("reach-up");
+/// Diagram detail strip: Downstream.
+pub const REACH_DOWN: Id = Id::new("reach-down");
+/// Diagram detail strip: Problems toggle.
+pub const PROBLEMS_TOGGLE: Id = Id::new("problems-toggle");
+/// Diagram detail strip: Cards toggle.
+pub const CARDS_TOGGLE: Id = Id::new("cards-toggle");
+/// Diagram hover tooltip.
+pub const DIAGRAM_TOOLTIP: Id = Id::new("diagram-tooltip");
+
+/// Diagram detail strip: the `j`-th source of the selected node.
+pub fn detail_source(j: usize) -> Id {
+    Id::from(format!("detail-source:{j}"))
+}
+
+/// The `k`-th finder result.
+pub fn finder_result(k: usize) -> Id {
+    Id::from(format!("finder-result:{k}"))
+}

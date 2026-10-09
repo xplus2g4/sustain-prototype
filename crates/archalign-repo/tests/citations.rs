@@ -118,3 +118,44 @@ fn repo_probe_end_to_end() {
     );
     assert_eq!(issues[1].message, "src/missing.rs does not exist");
 }
+
+#[test]
+fn citation_index_maps_files_folders_and_broken_markers() {
+    use archalign_model::{Issue, IssueCode};
+    use archalign_repo::citations::CitationIndex;
+    let doc: archalign_model::ArchitectureDoc = serde_json::from_value(serde_json::json!({
+        "schema_version": 1, "diagram_type": "architecture",
+        "meta": { "title": "t", "output": "t.html" },
+        "components": [
+            { "id": "a", "type": "backend", "label": "A",
+              "sources": [{ "path": "src/a/x.rs" }, { "path": "src/a/x.rs", "line": 3 }] },
+            { "id": "b", "type": "backend", "label": "B",
+              "sources": [{ "path": "src/a/x.rs" }, { "path": "src/b.rs", "line": 900 }] },
+            { "id": "c", "type": "backend", "label": "C", "sources": [{ "path": "../escape.rs" }] },
+            { "id": "d", "type": "backend", "label": "D" }
+        ]
+    }))
+    .unwrap();
+    let issues = vec![Issue::warning(
+        IssueCode::BrokenCitation,
+        "/components/1/sources/1/line",
+        "out of range",
+    )];
+    let idx = CitationIndex::build(&doc, &issues);
+    assert_eq!(idx.nodes_citing("src/a/x.rs"), &[0, 1]);
+    assert_eq!(idx.nodes_citing("src/b.rs"), &[1]);
+    assert!(
+        idx.nodes_citing("../escape.rs").is_empty(),
+        "invalid paths are not indexed"
+    );
+    assert_eq!(
+        idx.folder_counts.get("src"),
+        Some(&2),
+        "distinct files below src"
+    );
+    assert_eq!(idx.folder_counts.get("src/a"), Some(&1));
+    assert_eq!(
+        idx.broken_files.iter().cloned().collect::<Vec<_>>(),
+        ["src/b.rs"]
+    );
+}

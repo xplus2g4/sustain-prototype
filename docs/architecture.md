@@ -141,7 +141,7 @@ The type names below are the intended public surface. The implementer may refine
 
 **`citations`.**
 - `RepoProbe` implements `model::SourceProbe` over `Sandbox` and the `text` caps; the checks themselves live in `archalign-model::citations::check_citations` (FR-VAL-06/07).
-- `CitationIndex` maps file → citing nodes and folder → cited-file counts, for tree markers and reverse highlighting (M4).
+- `CitationIndex::build(doc, issues)` maps file → citing nodes, folder → distinct cited files below it, and the set of files with broken citations; the desktop uses it for tree markers (FR-TREE-06) and reverse highlighting (FR-TREE-07).
 
 **`storage`.**
 - `scan_history` lists `.archify/*/candidate.json` newest first (timestamp suffix, then mtime) with a `Valid`/`Invalid`/`Unsupported` status; `newest_valid` picks the one to open on import (FR-IMP-03).
@@ -206,13 +206,20 @@ The crate is a library (`src/lib.rs`, so tests can drive `App`) plus the `archal
 - `panes`: `PaneKind`, `PaneLayout` (default configuration, drag/drop via `State::drop`, ratio clamping through pane_grid's own min-size arithmetic, reopen by splitting the largest pane);
 - `tree`: `TreeState` (listed folders, expanded set, selection, pending reveal, citation markers) and its virtualized view;
 - `source`: `SourceState`, citation band and out-of-range rules, `FileHighlighter` (syntect with parse-state checkpoints every 128 lines, highlighting only the window being built), virtualized view;
-- `diagram`: `DiagramState` (empty state with Focus + Archify, loading, failure list, loaded document + `Scene` + warnings); the canvas arrives in M4;
+- `diagram`: `DiagramState` (content, camera, canvas size, selection, reach, reverse highlight, hover, finder, strip toggles) and the pane view: optional finder bar, a `stack` of the canvas and a pinned hover tooltip, and the detail strip (selection details with clickable sources and Upstream/Downstream, Problems, Cards);
+  - `diagram::camera`: `canvas = diagram × zoom + pan`, zoom about a point clamped to 10–400 %, fit with 40 px padding;
+  - `diagram::canvas`: `DiagramCanvas` implements `canvas::Program`. The static layer (boundaries, connections with arrowheads and labels, nodes with label/sublabel/tag and badges, legend) lives in a `canvas::Cache` inside the widget state and is cleared only when the scene version, theme, zoom or pan changes. The overlay (reach dimming, selection, reverse highlight, hover) is rebuilt each frame. The program hit-tests nodes and connections in diagram space and publishes `CanvasEvent`s (press/hit, unfocus, pan, ⌘/Ctrl-scroll zoom, hover, resize); modifiers come from `ModifiersChanged`;
+  - `diagram::logic`: pure reach BFS (cycle-safe), legend rows, finder matching, badges from citation warnings, tooltip and source labels;
 - `palette`: Archify's dark and light colors, and the iced themes built from them;
 - `fonts`: bundled JetBrains Mono, `ensure_loaded`, and `IcedTextMeasure` (`Paragraph::with_text(…).min_bounds()` through the global font system, so it works on worker threads);
 - `ids`: widget IDs used by the view and by tests;
 - `virtual_list`: the shared window/offset arithmetic ([0009](adr/0009-custom-virtualized-source-viewer.md)). Until a scrollable reports its viewport, the pane's body size is used.
 
-**Planned (later milestones):** the `diagram::Canvas` program (`canvas::Program` with a cached static layer and a cheap overlay layer, hit testing in diagram space, ⌘/Ctrl+scroll zoom because iced has no pinch events ([0005](adr/0005-iced-native-gui-toolkit.md))); `persist` (`state.json`, `settings.json`, a serde mirror of the pane layout because `pane_grid::Configuration` has no serde support ([0006](adr/0006-three-pane-grid-layout.md))); `keys` (environment, launch-directory `.env`, config-dir `.env` via `dotenvy::from_path_iter` ([0023](adr/0023-api-key-resolution.md))); modals (consent, settings); the run-log drawer; the watcher subscription.
+**Keyboard.** `event::listen_with` delivers every key press with its capture status. Diagram shortcuts (`+ - 0 F U D / ⌘F Esc`) apply only while the canvas has focus (set by a press inside it, cleared by a press outside) and only for uncaptured keys, so typing in a text field never triggers them. While the finder is open, ↑/↓ move and Esc closes it even though the field captured the key. ⌘/Ctrl+scroll zoom exists because iced has no pinch events ([0005](adr/0005-iced-native-gui-toolkit.md)).
+
+**Re-layout** (`ops::relayout`): strip geometry → layout → `write_back` → `atomic_write` → reload through the Import profile.
+
+**Planned (later milestones):** `persist` (`state.json`, `settings.json`, a serde mirror of the pane layout because `pane_grid::Configuration` has no serde support ([0006](adr/0006-three-pane-grid-layout.md))); `keys` (environment, launch-directory `.env`, config-dir `.env` via `dotenvy::from_path_iter` ([0023](adr/0023-api-key-resolution.md))); modals (consent, settings); the run-log drawer; the watcher subscription.
 
 **Subscriptions:** keyboard shortcuts and window resizes now; window close (for persistence) and `Subscription::run_with(repo_root, watch_stream)` for watcher batches later.
 

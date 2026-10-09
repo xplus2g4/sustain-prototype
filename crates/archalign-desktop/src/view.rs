@@ -286,6 +286,20 @@ fn title_bar<'a>(
             .style(button::text),
     )
     .id(ids::pane_maximize(kind));
+    let relayout: Option<Element<'a, Message>> =
+        (kind == PaneKind::Diagram && app.diagram.loaded().is_some()).then(|| {
+            container(
+                button(text("Re-layout").size(11))
+                    .on_press_maybe(
+                        app.action_enabled(Action::Relayout)
+                            .then_some(Message::Action(Action::Relayout)),
+                    )
+                    .padding(Padding::from([1, 6]))
+                    .style(button::text),
+            )
+            .id(ids::RELAYOUT)
+            .into()
+        });
     let can_close = app.panes.visible_count() > 1;
     let close_btn = container(
         button(text("Close").size(11))
@@ -305,9 +319,13 @@ fn title_bar<'a>(
             .id(ids::pane_title(kind))
             .height(TITLE_H - 8.0),
     )
-    .controls(pane_grid::Controls::new(
-        row![max_btn, close_btn].spacing(2),
-    ))
+    .controls(pane_grid::Controls::new({
+        let mut controls = row![].spacing(2);
+        if let Some(r) = relayout {
+            controls = controls.push(r);
+        }
+        controls.push(max_btn).push(close_btn)
+    }))
     .always_show_controls()
     .padding(Padding::from([4, 8]))
     .style(move |_| container::Style {
@@ -329,6 +347,7 @@ fn pane_body<'a>(app: &'a App, kind: PaneKind, p: &'a Palette) -> Element<'a, Me
             &app.diagram,
             diagram::ViewCtx {
                 palette: p,
+                theme: app.theme,
                 focus: &app.focus,
                 can_archify: app.can_archify(),
             },

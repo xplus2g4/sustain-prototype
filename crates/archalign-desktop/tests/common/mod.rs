@@ -126,7 +126,7 @@ impl Harness {
     }
 
     /// Feeds raw events through the UI, then dispatches the produced messages. Key presses
-    /// the UI ignores reach the app like the `keyboard::listen` subscription delivers them.
+    /// reach the app with their capture status, like the `event::listen_with` subscription.
     pub fn simulate(&mut self, events: Vec<Event>) -> Vec<event::Status> {
         let cursor = self.cursor;
         let mut messages = Vec::new();
@@ -144,12 +144,12 @@ impl Harness {
             self.send(m);
         }
         for (e, s) in events.iter().zip(&statuses) {
-            if let (
-                Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }),
-                event::Status::Ignored,
-            ) = (e, s)
-            {
-                self.send(Message::KeyPressed(key.clone(), *modifiers));
+            if let Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) = e {
+                self.send(Message::KeyPressed(
+                    key.clone(),
+                    *modifiers,
+                    *s == event::Status::Captured,
+                ));
             }
         }
         statuses

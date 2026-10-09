@@ -54,3 +54,74 @@ impl SourceProbe for RepoProbe<'_> {
         false
     }
 }
+
+/// File → citing nodes and folder → cited-file counts, for tree markers and reverse
+/// highlighting (FR-TREE-06, FR-TREE-07).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CitationIndex {
+    /// Repo-relative file path → indices of the components citing it (ascending, unique).
+    pub by_file: std::collections::BTreeMap<String, Vec<usize>>,
+    /// Folder path → number of distinct cited files below it (at any depth).
+    pub folder_counts: std::collections::BTreeMap<String, usize>,
+    /// Files with at least one broken citation.
+    pub broken_files: std::collections::BTreeSet<String>,
+}
+
+impl CitationIndex {
+    /// Builds the index. `issues` are the document's citation findings; a
+    /// `BrokenCitation` at `/components/{i}/sources/{j}…` marks that source's file as broken.
+    pub fn build(
+        doc: &archalign_model::ArchitectureDoc,
+        issues: &[archalign_model::Issue],
+    ) -> Self {
+        use archalign_model::IssueCode;
+        let mut idx = CitationIndex::default();
+        for (i, c) in doc.components.iter().enumerate() {
+            for s in c.sources() {
+                if !archalign_model::citation_path_ok(&s.path) {
+                    continue;
+                }
+                let nodes = idx.by_file.entry(s.path.clone()).or_default();
+                if nodes.last() != Some(&i) {
+                    nodes.push(i);
+                }
+            }
+        }
+        for path in idx.by_file.keys() {
+            let mut folder = String::new();
+            let segments: Vec<&str> = path.split('/').collect();
+            for seg in segments.iter().take(segments.len().saturating_sub(1)) {
+                if !folder.is_empty() {
+                    folder.push('/');
+                }
+                folder.push_str(seg);
+                *idx.folder_counts.entry(folder.clone()).or_insert(0) += 1;
+            }
+        }
+        for issue in issues {
+            if issue.code != IssueCode::BrokenCitation {
+                continue;
+            }
+            let mut parts = issue.pointer.split('/').skip(1);
+            let (Some("components"), Some(i), Some("sources"), Some(j)) =
+                (parts.next(), parts.next(), parts.next(), parts.next())
+            else {
+                continue;
+            };
+            let (Ok(i), Ok(j)) = (i.parse::<usize>(), j.parse::<usize>()) else {
+                continue;
+            };
+            if let Some(s) = doc.components.get(i).and_then(|c| c.sources().get(j))
+                && archalign_model::citation_path_ok(&s.path)
+            {
+                idx.broken_files.insert(s.path.clone());
+            }
+        }
+        idx
+    }
+
+    /// Components citing `path`.
+    pub fn nodes_citing(&self, path: &str) -> &[usize] {
+        self.by_file.get(path).map(Vec::as_slice).unwrap_or(&[])
+    }
+}
