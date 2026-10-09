@@ -1,0 +1,50 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/archalign-model",
+    "crates/archalign-layout",
+    "crates/archalign-repo",
+    "crates/archalign-agent",
+    "crates/archalign-desktop",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT"
+publish = false
+
+[workspace.dependencies]
+archalign-model = { path = "crates/archalign-model" }
+archalign-layout = { path = "crates/archalign-layout" }
+archalign-repo = { path = "crates/archalign-repo" }
+archalign-agent = { path = "crates/archalign-agent" }
+
+iced = { version = "0.14.0", features = ["canvas", "tokio", "advanced"] }
+litellm-rust = "=0.3.0"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+tokio = { version = "1.53", features = ["rt", "time"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+jsonschema = { version = "0.58", default-features = false }
+thiserror = "2.0"
+dugong = "0.8.0"
+ignore = "0.4"
+regex = "1.13"
+notify-debouncer-mini = "0.7"
+jiff = "0.2"
+syntect = { version = "5.3", default-features = false, features = ["default-syntaxes", "default-themes", "dump-load", "regex-fancy"] }
+rfd = "0.17"
+directories = "6.0"
+dotenvy = "0.15"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+insta = { version = "1.49", features = ["json"] }
+proptest = "1.11"
+iced_test = "0.14.0"
+tempfile = "3.27"
+
+[profile.dev.package."*"]
+opt-level = 2

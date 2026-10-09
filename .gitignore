@@ -1,0 +1,5 @@
+.archify/
+archify-src
+.smoke_repo/
+.env
+/target

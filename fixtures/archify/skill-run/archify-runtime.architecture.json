@@ -1,0 +1,129 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Archify runtime: agent → finalize → standalone HTML",
+    "output": ".archify/architecture-archify-runtime-20261009-221013/archify-runtime.html",
+    "quality_profile": "showcase",
+    "locale": "en",
+    "repository": {
+      "url": "https://github.com/tt-a1i/archify",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "27f78a2bd13a1ee0c71d5288650670513bf64e7c"
+    }
+  },
+  "components": [
+    { "id": "agent", "type": "external", "label": "AI agent", "sublabel": "Claude Code / Codex", "pos": [40, 190], "size": [150, 64],
+      "sources": [{ "path": "archify/SKILL.md", "line": 35, "end_line": 38, "label": "finalize command contract" }] },
+    { "id": "finalize", "type": "backend", "label": "finalize orchestrator", "sublabel": "bin/finalize.mjs · gate loop", "pos": [330, 190], "size": [300, 64],
+      "sources": [
+        { "path": "archify/bin/archify.mjs", "line": 5651, "end_line": 5701, "label": "commandFinalize" },
+        { "path": "archify/bin/finalize.mjs", "line": 21, "end_line": 22, "label": "gate list + update deadline" },
+        { "path": "archify/bin/finalize.mjs", "line": 726, "end_line": 750, "label": "gate loop" }
+      ] },
+    { "id": "deliver", "type": "backend", "label": "deliver gate", "sublabel": "archify.mjs commandDeliver", "pos": [770, 190], "size": [170, 64],
+      "sources": [
+        { "path": "archify/bin/archify.mjs", "line": 4733, "end_line": 4736, "label": "spawn renderer" },
+        { "path": "archify/bin/archify.mjs", "line": 4763, "end_line": 4765, "label": "run artifact checker" },
+        { "path": "archify/bin/archify.mjs", "line": 4892, "end_line": 4894, "label": "write .delivery.json" }
+      ] },
+    { "id": "renderer", "type": "backend", "label": "Type renderer", "sublabel": "AJV validate · layout · SVG", "pos": [1100, 190], "size": [190, 64],
+      "sources": [
+        { "path": "archify/renderers/architecture/render-architecture.mjs", "line": 51, "end_line": 54, "label": "renderer entry" },
+        { "path": "archify/renderers/shared/cli.mjs", "line": 110, "end_line": 115, "label": "validate, verify, load template" },
+        { "path": "archify/renderers/shared/utils.mjs", "line": 144, "end_line": 195, "label": "applyTemplate slots" }
+      ] },
+    { "id": "output", "type": "database", "label": "HTML + receipts", "sublabel": "<slug>.html · *.json", "pos": [1430, 190], "size": [190, 64],
+      "sources": [
+        { "path": "archify/renderers/shared/cli.mjs", "line": 262, "end_line": 330, "label": "writeDiagram atomic publish" },
+        { "path": "archify/bin/finalize.mjs", "line": 436, "end_line": 453, "label": "finalize receipt paths" }
+      ] },
+    { "id": "viewer", "type": "frontend", "label": "Viewer runtime", "sublabel": "in-page Archify.* JS", "pos": [1430, 340], "size": [190, 64],
+      "sources": [
+        { "path": "archify/assets/template.html", "line": 5365, "end_line": 5372, "label": "Archify runtime script" },
+        { "path": "archify/assets/template.html", "line": 35, "end_line": 41, "label": "inlined WOFF2 fonts" }
+      ] },
+    { "id": "evidence", "type": "security", "label": "Evidence verifier", "sublabel": "repository-evidence.mjs", "pos": [1110, 340], "size": [170, 64],
+      "sources": [
+        { "path": "archify/renderers/shared/repository-evidence.mjs", "line": 146, "end_line": 162, "label": "pinned 40-char SHA required" },
+        { "path": "archify/renderers/shared/repository-evidence.mjs", "line": 296, "end_line": 327, "label": "blob + line-range check" },
+        { "path": "archify/renderers/shared/repository-location.mjs", "line": 53, "end_line": 59, "label": "blob link builder" }
+      ] },
+    { "id": "git", "type": "external", "label": "Git object store", "sublabel": "--repo-root @ pinned SHA", "pos": [1110, 490], "size": [170, 64],
+      "sources": [{ "path": "archify/renderers/shared/repository-evidence.mjs", "line": 23, "end_line": 28, "label": "runGit --no-replace-objects" }] },
+    { "id": "check", "type": "security", "label": "Strict check", "sublabel": "provenance + checker", "pos": [300, 340], "size": [150, 64],
+      "sources": [
+        { "path": "archify/bin/archify.mjs", "line": 5370, "end_line": 5424, "label": "commandCheck" },
+        { "path": "archify/scripts/check-render-output.mjs", "line": 105, "end_line": 432, "label": "artifact checks" }
+      ] },
+    { "id": "browsercheck", "type": "backend", "label": "Browser gate", "sublabel": "visual-check.mjs · CDP", "pos": [500, 340], "size": [170, 64],
+      "sources": [
+        { "path": "archify/bin/finalize.mjs", "line": 737, "end_line": 746, "label": "in-process browser-check" },
+        { "path": "archify/bin/visual-check.mjs", "line": 1857, "end_line": 1947, "label": "viewport observation" }
+      ] },
+    { "id": "chrome", "type": "external", "label": "Chrome / Chromium", "sublabel": "system install, headless", "pos": [500, 490], "size": [170, 64],
+      "sources": [
+        { "path": "archify/bin/visual-check.mjs", "line": 1309, "end_line": 1347, "label": "findChrome" },
+        { "path": "archify/bin/visual-check.mjs", "line": 1481, "end_line": 1508, "label": "headless pipe args" },
+        { "path": "archify/bin/visual-check.mjs", "line": 1524, "end_line": 1534, "label": "spawn Chrome" }
+      ] },
+    { "id": "manifest", "type": "cloud", "label": "Update manifest", "sublabel": "tt-a1i.github.io", "pos": [405, 40], "size": [150, 64],
+      "sources": [
+        { "path": "archify/scripts/update-contract.mjs", "line": 3, "label": "manifest URL" },
+        { "path": "archify/scripts/check-update.mjs", "line": 1382, "end_line": 1426, "label": "GET with abort timeout" },
+        { "path": "archify/bin/finalize.mjs", "line": 699, "label": "started by finalize" }
+      ] }
+  ],
+  "boundaries": [
+    { "kind": "security-group", "label": "Trust boundary · Archify CLI process tree (Node ≥18)", "wraps": ["finalize", "deliver", "renderer", "check", "browsercheck", "evidence"] },
+    { "kind": "region", "label": "Output folder", "wraps": ["output"] },
+    { "kind": "security-group", "label": "Reader browser · offline", "wraps": ["viewer"] }
+  ],
+  "connections": [
+    { "id": "run-finalize", "from": "agent", "to": "finalize", "label": "finalize --json", "variant": "emphasis" },
+    { "id": "gate-deliver", "from": "finalize", "to": "deliver", "label": "gate 1 · spawn", "variant": "emphasis" },
+    { "id": "spawn-renderer", "from": "deliver", "to": "renderer", "label": "spawn render-<type>", "variant": "emphasis" },
+    { "id": "write-html", "from": "renderer", "to": "output", "label": "atomic write", "variant": "emphasis" },
+    { "id": "open-html", "from": "output", "to": "viewer", "label": "open file://", "variant": "emphasis" },
+    { "id": "verify-sources", "from": "renderer", "to": "evidence", "label": "verify sources", "variant": "security" },
+    { "id": "read-git", "from": "evidence", "to": "git", "label": "git show <sha>" },
+    { "id": "gate-check", "from": "finalize", "to": "check", "label": "gate 2" },
+    { "id": "gate-browser", "from": "finalize", "to": "browsercheck", "label": "gate 3" },
+    { "id": "drive-chrome", "from": "browsercheck", "to": "chrome", "label": "CDP pipe" },
+    { "id": "update-check", "from": "finalize", "to": "manifest", "label": "HTTPS GET ≤4 s", "variant": "dashed" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Gate chain", "items": [
+      "validate runs inside deliver; finalize records it as embedded",
+      "Stops at the first non-passing gate",
+      "Candidate sha256 is checked before and after the run",
+      "Writes .finalize.json and .finalize-summary.json atomically"
+    ] },
+    { "dot": "emerald", "title": "Render pipeline", "items": [
+      "AJV 2020 validators are precompiled; no runtime npm deps",
+      "Showcase profile turns geometry warnings into errors",
+      "assets/template.html slots: SVG, cards, i18n, source evidence"
+    ] },
+    { "dot": "rose", "title": "Provenance & trust", "items": [
+      "deliver writes <out>.delivery.json with sha256 + bytes",
+      "check reruns check-render-output and compares that sidecar",
+      "Evidence reads committed git objects; never contacts a remote"
+    ] },
+    { "dot": "violet", "title": "Browser gate", "items": [
+      "System Chrome over --remote-debugging-pipe; no Playwright",
+      "4 light + 2 dark viewports: overflow, ≥6px text, theme, dock",
+      "No Chrome found → gate skipped with exit 2"
+    ] },
+    { "dot": "amber", "title": "Network egress", "items": [
+      "Update manifest only: redirect:error, 24 h cache, child SIGKILL at deadline",
+      "Optional brands capture fetches favicons over HTTP(S)",
+      "Output HTML is self-contained: fonts, CSS, JS inlined"
+    ] },
+    { "dot": "slate", "title": "Off-path commands", "items": [
+      "preview: loopback HTTP + SSE, re-runs deliver on change",
+      "compare (delta), guide (recipes), migrate (workflow v2)",
+      "brands, doctor, demo, recover-output"
+    ] }
+  ]
+}

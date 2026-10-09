@@ -1,0 +1,11 @@
+[package]
+name = "archalign-repo"
+description = "Filesystem and git boundary: sandbox, tree, storage, watcher."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+archalign-model.workspace = true
