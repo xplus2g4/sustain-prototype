@@ -25,7 +25,7 @@ This document justifies every direct dependency, dev-dependency and bundled asse
 | `serde_json` | `1.0` | defaults | all crates | JSON for diagrams, settings, state, run log, snapshots | MIT OR Apache-2.0 | [0012](adr/0012-archify-json-v1-canonical-format.md), [0015](adr/0015-diagram-storage-app-state-and-run-log.md) |
 | `jsonschema` | `0.58` | `default-features = false` | archalign-model | JSON Schema validation, parity with Archify's AJV gate | MIT | [0014](adr/0014-schema-validation-with-vendored-archify-schemas.md) |
 | `thiserror` | `2.0` | defaults | library crates | Typed error enums | MIT OR Apache-2.0 | [0003](adr/0003-cargo-workspace-and-crate-boundaries.md) |
-| `dugong` | `0.8.0` | none (crate has no features) | archalign-layout | dagre-compatible compound graph layout | MIT OR Apache-2.0 | [0018](adr/0018-app-computed-layout-dugong-and-orthogonal-routing.md) |
+| `dugong` | `0.8.0` | none (crate has no features) | archalign-layout | dagre-compatible compound graph layout | MIT OR Apache-2.0 | [0031](adr/0031-dugong-placement-and-grid-astar-router.md) |
 | `ignore` | `0.4` | defaults | archalign-repo | `.gitignore`-aware directory walking | Unlicense OR MIT | [0025](adr/0025-agent-tool-sandbox-and-deny-list.md) |
 | `regex` | `1.13` | defaults | archalign-repo | `grep` tool over model-supplied patterns | MIT OR Apache-2.0 | [0025](adr/0025-agent-tool-sandbox-and-deny-list.md) |
 | `notify-debouncer-mini` | `0.7` | defaults (`macos_fsevent`) | archalign-repo | Debounced recursive file watching | MIT OR Apache-2.0 (`notify`: CC0-1.0) | [0017](adr/0017-file-watching.md) |
@@ -168,7 +168,7 @@ This document justifies every direct dependency, dev-dependency and bundled asse
 
 - **Version and features.** `0.8.0`. The crate declares no features. MSRV **1.95**.
 - **Used by.** archalign-layout, behind the `LayoutEngine` trait.
-- **Purpose.** Computes node positions when a diagram is not fully authored (FR-LAY). Components become nodes sized by `TextMeasure`; boundaries become compound parents, with nesting allowed; rank direction is left→right. The in-house orthogonal router turns dagre's polyline bend points into axis-aligned segments ([0018](adr/0018-app-computed-layout-dugong-and-orthogonal-routing.md)).
+- **Purpose.** Computes node positions when a diagram is not fully authored (FR-LAY). Components become nodes sized by `TextMeasure`; boundaries become compound parents, with nesting allowed; rank direction is left→right; self-loops are left out of the dagre graph. Only node positions are taken from dagre: the in-house grid A* router draws every connection, in authored and auto layouts alike. Calls are wrapped in `catch_unwind`, and a grid placement is used if dugong fails ([0031](adr/0031-dugong-placement-and-grid-astar-router.md), which supersedes [0018](adr/0018-app-computed-layout-dugong-and-orthogonal-routing.md)).
 - **Why this one.** A Rust port of dagre that supports compound (nested cluster) layout, under a permissive license (MIT OR Apache-2.0).
 - **Alternatives considered.** `merman-layout-elk`, `mmdflux`, `rust-sugiyama`, `layout-rs`, `gen-sugiyama`, `abstracttui-graph`, porting Archify's `routing.mjs`, and a fully in-house Sugiyama. See [section 4](#4-considered-but-not-used).
 - **License.** MIT OR Apache-2.0.
@@ -345,7 +345,7 @@ Secrets and git:
 - `git2`: libgit2 is a C dependency with a more complex build; the git CLI is used instead ([0016](adr/0016-local-folder-import-and-git-metadata-via-cli.md)).
 - `gix`: a large dependency tree [inference] ([0016](adr/0016-local-folder-import-and-git-metadata-via-cli.md)).
 
-Layout ([0018](adr/0018-app-computed-layout-dugong-and-orthogonal-routing.md)):
+Layout ([0018](adr/0018-app-computed-layout-dugong-and-orthogonal-routing.md), [0031](adr/0031-dugong-placement-and-grid-astar-router.md)):
 
 - `merman-layout-elk` 0.8.0: links `merman-elk-layered`, which is EPL-2.0 (EPL text and source-availability information would have to ship); stable only since 2026-10-05, ~15% doc coverage, self-described as an internal adapter. Can be trialled later behind `LayoutEngine`.
 - `mmdflux` 2.6.1: input must be Mermaid or MMDS text, and subgraph bounds are width/height only.

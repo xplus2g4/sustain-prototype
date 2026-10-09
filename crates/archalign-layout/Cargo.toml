@@ -9,3 +9,11 @@ publish.workspace = true
 
 [dependencies]
 archalign-model.workspace = true
+dugong.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+proptest.workspace = true
+serde_json.workspace = true

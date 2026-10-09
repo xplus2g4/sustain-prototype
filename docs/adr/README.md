@@ -48,7 +48,7 @@ Paths and URLs from this brief only.
 | 0015 | [Diagram storage, app state and run log](0015-diagram-storage-app-state-and-run-log.md) | Accepted |
 | 0016 | [Local-folder import and git metadata via the git CLI](0016-local-folder-import-and-git-metadata-via-cli.md) | Accepted |
 | 0017 | [File watching](0017-file-watching.md) | Accepted |
-| 0018 | [App-computed layout: dugong plus orthogonal routing](0018-app-computed-layout-dugong-and-orthogonal-routing.md) | Accepted |
+| 0018 | [App-computed layout: dugong plus orthogonal routing](0018-app-computed-layout-dugong-and-orthogonal-routing.md) | Superseded by 0031 |
 | 0019 | [Geometry write-back and authored layouts](0019-geometry-write-back-and-authored-layouts.md) | Accepted |
 | 0020 | [A built-in LLM agent authors diagrams](0020-built-in-llm-agent-authors-diagrams.md) | Accepted |
 | 0021 | [litellm-rust behind an `LlmClient` trait](0021-litellm-rust-behind-llm-client-trait.md) | Accepted |
@@ -61,3 +61,4 @@ Paths and URLs from this brief only.
 | 0028 | [Agent run budgets](0028-agent-run-budgets.md) | Accepted |
 | 0029 | [Testing strategy and live smoke runs](0029-testing-strategy-and-live-smoke-runs.md) | Accepted |
 | 0030 | [Long-running implementation process](0030-long-running-implementation-process.md) | Accepted |
+| 0031 | [dugong placement plus one grid A* orthogonal router](0031-dugong-placement-and-grid-astar-router.md) | Accepted |

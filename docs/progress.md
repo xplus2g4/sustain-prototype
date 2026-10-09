@@ -10,7 +10,7 @@ How to use this file ([spec §11–§13](spec.md#11-milestones), [0030](adr/0030
 |---|---|---|---|
 | M0 Scaffold | Done | see `git log --grep "^M0"` | 2026-10-10 |
 | M1 Model and validation | Done | see `git log --grep "^M1"` | 2026-10-10 |
-| M2 Layout and routing | Not started | — | — |
+| M2 Layout and routing | Done | see `git log --grep "^M2"` | 2026-10-10 |
 | M3 App shell | Not started | — | — |
 | M4 Diagram and navigation | Not started | — | — |
 | M5 Agent | Not started | — | — |
@@ -43,15 +43,15 @@ How to use this file ([spec §11–§13](spec.md#11-milestones), [0030](adr/0030
 
 ## M2 Layout and routing
 
-- [ ] FR-LAY-01 Mode selection
-- [ ] FR-LAY-02 Grid conversion
-- [ ] FR-LAY-03 Sizes
-- [ ] FR-LAY-04 Auto layout
-- [ ] FR-LAY-05 Routing
-- [ ] FR-LAY-06 Boundaries
-- [ ] FR-LAY-07 Invariants for auto layouts
-- [ ] FR-LAY-08 Write-back
-- [ ] NFR-PERF-03 Layout and routing of 60 nodes < 100 ms
+- [x] FR-LAY-01 Mode selection. Evidence: `archalign-layout/tests/layout.rs`: `all_positioned_is_authored`, `all_on_grid_is_authored`, `mix_of_grid_and_pos_is_authored_and_pos_wins`, `partially_positioned_is_auto_with_warning`, `none_positioned_is_auto_without_warning`.
+- [x] FR-LAY-02 Grid conversion. Evidence: `archify_repo_grid_fixture_resolves_to_expected_positions` (all 9 cells hand-computed), `all_on_grid_is_authored` (defaults).
+- [x] FR-LAY-03 Sizes. Evidence: `auto_sizes_are_exact_with_fixed_advance` (219×69, 120×60 minimum, 360×60), `authored_sizes_use_size_or_default`.
+- [x] FR-LAY-04 Auto layout. Evidence: `tests/snapshots.rs::auto_layout_geometry_snapshots`: 24 insta JSON snapshots in `crates/archalign-layout/tests/snapshots/`, stable across reruns.
+- [x] FR-LAY-05 Routing. Evidence: `endpoints_sit_on_node_sides_and_arrow_is_at_target`, `authored_sides_are_honored`, `authored_via_points_are_visited_in_order`, `routes_avoid_nodes_that_are_not_endpoints`, `parallel_connections_are_offset_by_at_least_8px` (3 placements), `self_loop_is_a_rectangle_on_the_right_side`, `label_is_centered_on_the_longest_segment`. Router replaced per ADR 0031.
+- [x] FR-LAY-06 Boundaries. Evidence: `boundary_uses_pad_on_every_side`, `boundary_default_padding_is_30_sides_50_bottom`, `nested_boundary_sits_inside_its_parent`.
+- [x] FR-LAY-07 Invariants for auto layouts. Evidence: `tests/invariants.rs::auto_layout_invariants_hold` (proptest, ≤60 nodes, ≤120 edges incl. self-loops and multi-edges, 2-level boundaries; 64 cases by default, plus 2,400 cases run with `PROPTEST_CASES=600/800` in release, all passing); `every_fixture_satisfies_invariants_when_auto_laid_out`.
+- [x] FR-LAY-08 Write-back. Evidence: `write_back_sets_integer_pos_and_size_and_nothing_else` (integer pos/size, other fields unchanged, `layout_document` leaves the document untouched, reopens as authored with identical boxes). The app-level "opening never writes" check is repeated in M4 when the open path exists.
+- [x] NFR-PERF-03 Layout and routing of 60 nodes < 100 ms. Evidence: `cargo test --workspace --release -- --ignored perf_` → `perf_layout_and_routing_of_60_nodes_under_100ms`: median of 7 = 13.4 ms (max 21.7 ms), 120 edges.
 
 ## M3 App shell
 
@@ -179,3 +179,9 @@ How to use this file ([spec §11–§13](spec.md#11-milestones), [0030](adr/0030
   - Finding: the vendored `portableOutputPath` surrogate pattern can't compile in Rust regex; swapped in memory for an equivalent never-matching class (recorded in `libraries.md`; no behavior change because Rust strings can't contain surrogates).
   - Gates: `cargo fmt --check` ok; `cargo clippy --workspace --all-targets -- -D warnings` ok; `cargo test --workspace` ok (model: 2 unit + 3 fixture + 32 validation tests).
   - Commits are made with `git -c commit.gpgsign=false` because the configured 1Password SSH signer fails non-interactively ("1Password: failed to fill whole buffer").
+- **2026-10-10. M2 Layout and routing.**
+  - `archalign-layout`: `TextMeasure` + `FixedAdvance`, mode selection and Archify grid conversion, boundary nesting and padding, `DugongEngine` (compound, LR) with a grid fallback, one sparse-grid A* orthogonal router for authored and auto layouts, `Scene`, `write_back`.
+  - ADR 0031 supersedes 0018. Reason: saved diagrams always reopen as authored (ADR 0019), so routing dagre bend points would only affect the first view. A bend-aware A* heuristic brought routing for 60 nodes from 122 ms to about 6 ms.
+  - Property testing found that many self-loops on one node could reach the next rank. Loop nesting is now capped at 3.
+  - Visual check of all 24 fixtures (authored and auto), rendered to throwaway SVGs under `target/smoke/layout-svg/`.
+  - Gates: fmt, clippy `-D warnings`, `cargo test --workspace` all green; perf: 13.4 ms median.

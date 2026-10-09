@@ -1,6 +1,6 @@
 # 0018. App-computed layout: dugong plus orthogonal routing
 
-- Status: Accepted
+- Status: Superseded by [0031](0031-dugong-placement-and-grid-astar-router.md)
 - Date: 2026-10-10
 - Related: [0003](0003-cargo-workspace-and-crate-boundaries.md), [0010](0010-fonts-text-measurement-and-palette.md), [0012](0012-archify-json-v1-canonical-format.md), [0019](0019-geometry-write-back-and-authored-layouts.md), [0020](0020-built-in-llm-agent-authors-diagrams.md); spec: FR-LAY
 

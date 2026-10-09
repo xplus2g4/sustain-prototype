@@ -96,23 +96,26 @@ The type names below are the intended public surface. The implementer may refine
 
 **Purpose.** Turn an `ArchitectureDoc` into a `Scene` of absolute geometry. Pure and deterministic.
 
-**`TextMeasure`.** `fn measure(&self, text: &str, size_px: f32) -> Size`.
+**`TextMeasure`.** `fn measure(&self, text: &str, size_px: f64) -> Size` (all layout geometry is `f64`; the desktop converts to `f32` when drawing).
 - The desktop implementation wraps `iced::advanced::graphics::text::Paragraph` with JetBrains Mono.
-- Tests use a fixed-advance implementation ([0010](adr/0010-fonts-text-measurement-and-palette.md)).
+- Tests use `FixedAdvance` (0.6 em advance, 1.32 em line height, JetBrains Mono's metrics) ([0010](adr/0010-fonts-text-measurement-and-palette.md)).
+- `measure::auto_node_size` stacks label (14 px), sublabel (12 px) and tag (11 px), adds 12/10 px padding, applies the 120×60 minimum and rounds up to whole pixels.
 
-**`LayoutEngine`.** `fn place(&self, graph: &LayoutGraph) -> Result<Placement, LayoutError>`.
-- `DugongEngine` builds a compound dagre graph: components are nodes, boundaries are parents, and ranks run left to right ([0018](adr/0018-app-computed-layout-dugong-and-orthogonal-routing.md)).
+**`LayoutEngine`.** `fn place(&self, graph: &LayoutGraph) -> Result<Placement, LayoutError>` ([0031](adr/0031-dugong-placement-and-grid-astar-router.md)).
+- `DugongEngine` builds a compound dagre graph: components are nodes, a component's innermost boundary is its parent, boundaries nest, ranks run left to right, self-loops are left out. Panics are caught.
+- `GridFallbackEngine` is used when dugong fails or returns overlapping boxes.
 
-**Authored mode.** Uses `pos`, or grid cells converted with Archify's formula, with default size 120×60. Auto mode is used for everything else (FR-LAY-01..03).
+**Modes (`mode`).** Authored when every component has `pos`, or a grid cell in grid mode (Archify's formula; `pos` wins; default size 120×60). Otherwise auto, with a `PartialPositions` warning when some positions were ignored (FR-LAY-01..03).
 
-**Router.**
-- Orthogonalizes dagre's bend points, or routes between authored boxes.
-- Honors `fromSide`, `toSide` and `via`; avoids nodes that aren't endpoints; offsets parallel edges; draws self-loops.
-- Places labels and arrowheads.
+**Router (`route`).** One router for authored and auto layouts ([0031](adr/0031-dugong-placement-and-grid-astar-router.md)):
+- sides from `fromSide`/`toSide` or relative position; ports spread along each side;
+- A* over a sparse grid of inflated node edges (10 px margin), port/`via` lines and corridor midlines, with bend and reuse penalties, so routes never enter a node other than at their own ports;
+- `via` points visited in order; self-loops as small rectangles on the right side;
+- label anchor at the midpoint of the longest segment; arrowhead at the target.
 
-**Boundaries.** Rectangles that enclose their members, using `pad` or Archify's 30/50 rule.
+**Boundaries (`boundaries`).** A nesting forest (smallest strict superset is the parent; equal member sets nest by index). Each rectangle encloses its members and nested boundaries, plus `pad` or Archify's 30/30/30/50 rule; the label anchor is at the top-left.
 
-**`Scene`.** `nodes`, `boundaries` and `edges` (polylines, label anchors, arrowheads), plus `bounds` and `warnings`. Elements keep the model IDs, so the UI can map hits back to components and connections.
+**`Scene` (`scene`).** `mode`, `nodes`, `boundaries` (outermost first) and `edges` (route polylines, label anchors, arrowheads), plus `bounds` and `warnings`. Elements keep their model indices and IDs, so the UI can map hits back to components and connections. `layout_document(doc, measure)` never mutates the document.
 
 **`write_back(&mut ArchitectureDoc, &Scene)`.** Sets integer `pos`/`size` on every component.
 
@@ -417,7 +420,7 @@ flowchart LR
 | Seam | Today | Planned or possible |
 |---|---|---|
 | `DiagramDocument` + type detection | Architecture only | Workflow, sequence, dataflow, lifecycle ([0013](adr/0013-architecture-diagrams-only-in-v1.md)) |
-| `LayoutEngine` | dugong (dagre) | ELK via `merman-layout-elk`, through a superseding ADR ([0018](adr/0018-app-computed-layout-dugong-and-orthogonal-routing.md)) |
+| `LayoutEngine` | dugong (dagre), grid fallback | ELK via `merman-layout-elk`, through a superseding ADR ([0031](adr/0031-dugong-placement-and-grid-astar-router.md)) |
 | `LlmClient` | litellm-rust 0.3.0 | `async-openai` fallback ([0021](adr/0021-litellm-rust-behind-llm-client-trait.md)) |
 | Model string | `openai/gpt-6.1-sol` | Any litellm `provider/model` with its own key variable ([0022](adr/0022-default-model-gpt-6-1-sol.md)) |
 | `TextMeasure` | iced paragraph with JetBrains Mono | Other fonts, without touching layout code |
