@@ -77,18 +77,20 @@ The type names below are the intended public surface. The implementer may refine
 
 **`DiagramDocument` and `DiagramType`.** `DiagramDocument` is an enum with a single `Architecture(ArchitectureDoc)` variant, plus detection of other Archify types for History. This is the seam for adding types later ([0013](adr/0013-architecture-diagrams-only-in-v1.md)).
 
-**Schema validation.** The vendored schemas are embedded with `include_str!` and compiled once with `jsonschema`, with the common schema registered as a resource ([0014](adr/0014-schema-validation-with-vendored-archify-schemas.md)).
+**Schema validation.** The vendored schemas are embedded with `include_str!` and compiled once (a `LazyLock`) with `jsonschema`, with the common schema registered as a resource ([0014](adr/0014-schema-validation-with-vendored-archify-schemas.md)). The one surrogate-range pattern Rust regex can't compile is swapped in memory for an equivalent never-matching class (see `libraries.md`, `jsonschema`).
 
 **Issues.** Every problem is an `Issue { severity, code, pointer, message }`. The same type feeds the UI banners, the problem list and the repair messages sent to the model.
 
 **Validation profiles.** `Import` and `Submission` ([0027](adr/0027-submission-gate-and-repair-loop.md)).
+- `document::load_architecture(bytes)`: JSON → type detection (non-architecture types fail with "Unsupported diagram type: `<type>`") → schema → serde → `checks::semantic(doc, Profile::Import)`. Returns `Loaded { doc, warnings }` or `LoadFailure { diagram_type, errors }`.
+- `submission::check_submission(value, &AppOwned)`: steps 1–4 of the Submission profile; it returns the dropped-field pointers together with the document or the errors. Step 5 (citations) is run by the agent gate.
 - Citation checks call a `SourceProbe` trait (`line_count`, `is_text`, `is_denied`) implemented by `archalign-repo`, so the model stays free of I/O.
 
 **Editing helpers.**
 - `apply_app_owned_fields` and `drop_model_supplied_fields` are used by the submission gate.
 - `strip_geometry` is used by Re-layout ([0019](adr/0019-geometry-write-back-and-authored-layouts.md)).
 
-**Serialization.** Pretty-printed with 2-space indentation, whole numbers written as integers. The guarantee is that load→save produces an equal JSON value.
+**Serialization.** Pretty-printed with 2-space indentation, whole numbers written as integers (the `Num` newtype serializes whole `f64` values through `serialize_i64`). The guarantee is that load→save produces an equal JSON value.
 
 ### 3.2 archalign-layout
 

@@ -151,6 +151,8 @@ This document justifies every direct dependency, dev-dependency and bundled asse
 - **Alternatives considered.** serde plus hand-written constraint checks (fewer dependencies, but drifts from the AJV gate). Other JSON Schema crates were not evaluated.
 - **License.** MIT.
 - **Risks and notes.** `idna` is a default feature and is dropped [inference: it affects only internationalized `format` checks]. The Archify schemas in `archify-src/archify/schemas/` contain no `format` keyword (checked on 2026-10-10). Fast-moving 0.x versions; the requirement is pinned to the 0.58 minor.
+  - `common.schema.json`'s `portableOutputPath` contains `not: {pattern: "[\uD800-\uDFFF]"}`. Rust's regex engines cannot compile surrogate code points, so building the validator fails on the vendored file as-is (observed 2026-10-10: `ValidationError … kind: Format { format: "regex" } … /$defs/portableOutputPath/allOf/2/not/pattern`). A Rust `String` can never hold a surrogate, so that clause always passes; `archalign-model::schema` swaps it in memory for the never-matching `[^\s\S]`. The vendored file stays byte-identical, and the remaining path rules are covered by `output_path_rules_are_enforced`.
+  - `cargo tree -p archalign-model -i reqwest` finds no match: no HTTP client is linked through `jsonschema`.
 
 ### `thiserror`
 

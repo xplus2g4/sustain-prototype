@@ -9,7 +9,7 @@ How to use this file ([spec §11–§13](spec.md#11-milestones), [0030](adr/0030
 | Milestone | Status | Commit | Date |
 |---|---|---|---|
 | M0 Scaffold | Done | see `git log --grep "^M0"` | 2026-10-10 |
-| M1 Model and validation | Not started | — | — |
+| M1 Model and validation | Done | see `git log --grep "^M1"` | 2026-10-10 |
 | M2 Layout and routing | Not started | — | — |
 | M3 App shell | Not started | — | — |
 | M4 Diagram and navigation | Not started | — | — |
@@ -34,12 +34,12 @@ How to use this file ([spec §11–§13](spec.md#11-milestones), [0030](adr/0030
 
 ## M1 Model and validation
 
-- [ ] FR-VAL-01 Load pipeline
-- [ ] FR-VAL-02 Model coverage
-- [ ] FR-VAL-03 Lossless save
-- [ ] FR-VAL-04 Import profile
-- [ ] FR-VAL-05 Submission profile
-- [ ] FR-DIA-12 Unsupported diagrams (type detection)
+- [x] FR-VAL-01 Load pipeline. Evidence: `archalign-model/tests/validation.rs`: `malformed_json_is_an_error_with_position`, `schema_errors_carry_pointer_and_message` (pointer `/components/1/type`), `ui_shows_at_most_twenty_errors` (`first_errors` caps at `MAX_SHOWN_ERRORS = 20`), `non_object_json_fails_without_panicking`.
+- [x] FR-VAL-02 Model coverage. Evidence: `tests/fixtures.rs::every_fixture_loads` (all 24 vendored fixtures); `validation.rs::kitchen_sink_document_covers_every_schema_property` (every schema property set at once round-trips); `extra_field_fails_and_names_the_field` (schema and serde both name `colour`), `extra_nested_meta_field_fails`.
+- [x] FR-VAL-03 Lossless save. Evidence: `fixtures.rs::load_save_round_trips_to_equal_json_value` (24 fixtures), `saved_output_is_two_space_pretty_with_integer_numbers`, `num::tests::whole_values_serialize_as_integers`.
+- [x] FR-VAL-04 Import profile. Evidence: `validation.rs::import_*` — errors: unknown `from`/`to`/`wraps`, duplicate component and connection IDs, schema (`schema_errors_carry_pointer_and_message`), parse (`malformed_json_*`); warnings: `import_missing_sources_is_warning`, `import_partial_boundary_overlap_is_warning`. Broken citations are FR-VAL-06 (M3).
+- [x] FR-VAL-05 Submission profile (steps 1–4; citations in M3/M5). Evidence: `validation.rs::submission_*` — app-owned fields set and overridden, 23 dropped fields reported by pointer, model `meta.repository` dropped without git, rejections for schema, unknown field, duplicate IDs, unresolved reference, missing sources, >3 sources, partial overlap, equal boundaries.
+- [x] FR-DIA-12 Unsupported diagrams (type detection). Evidence: `validation.rs::non_architecture_type_is_unsupported` (message "Unsupported diagram type: `workflow`" etc.), `detects_types`.
 
 ## M2 Layout and routing
 
@@ -174,3 +174,8 @@ How to use this file ([spec §11–§13](spec.md#11-milestones), [0030](adr/0030
   - Vendored the 2 Archify schemas and 24 architecture fixtures from `archify-src` @ `27f78a2`; JetBrains Mono 2.304 Regular/Bold from the official release; `THIRD_PARTY_NOTICES.md`.
   - Gates: `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` (3 passed: crate-graph checks for NFR-QUAL-03).
   - Dev profile builds dependencies at `opt-level = 2` so syntect/dugong-heavy tests stay fast.
+- **2026-10-10. M1 Model and validation.**
+  - `archalign-model`: strict serde types for every schema property, `Num` (whole numbers as integers), offline `jsonschema` validator, Import/Submission profiles, `strip_geometry`, `to_pretty_json`.
+  - Finding: the vendored `portableOutputPath` surrogate pattern can't compile in Rust regex; swapped in memory for an equivalent never-matching class (recorded in `libraries.md`; no behavior change because Rust strings can't contain surrogates).
+  - Gates: `cargo fmt --check` ok; `cargo clippy --workspace --all-targets -- -D warnings` ok; `cargo test --workspace` ok (model: 2 unit + 3 fixture + 32 validation tests).
+  - Commits are made with `git -c commit.gpgsign=false` because the configured 1Password SSH signer fails non-interactively ("1Password: failed to fill whole buffer").
