@@ -51,7 +51,7 @@ Paths and URLs from this brief only.
 | 0018 | [App-computed layout: dugong plus orthogonal routing](0018-app-computed-layout-dugong-and-orthogonal-routing.md) | Superseded by 0031 |
 | 0019 | [Geometry write-back and authored layouts](0019-geometry-write-back-and-authored-layouts.md) | Accepted |
 | 0020 | [A built-in LLM agent authors diagrams](0020-built-in-llm-agent-authors-diagrams.md) | Accepted |
-| 0021 | [litellm-rust behind an `LlmClient` trait](0021-litellm-rust-behind-llm-client-trait.md) | Accepted |
+| 0021 | [litellm-rust behind an `LlmClient` trait](0021-litellm-rust-behind-llm-client-trait.md) | Accepted; superseded for `openai/` by 0034 |
 | 0022 | [Default model: gpt-6.1-sol](0022-default-model-gpt-6-1-sol.md) | Accepted |
 | 0023 | [API key resolution](0023-api-key-resolution.md) | Accepted |
 | 0024 | [Data egress consent and network policy](0024-data-egress-consent-and-network-policy.md) | Accepted |
@@ -63,3 +63,5 @@ Paths and URLs from this brief only.
 | 0030 | [Long-running implementation process](0030-long-running-implementation-process.md) | Accepted |
 | 0031 | [dugong placement plus one grid A* orthogonal router](0031-dugong-placement-and-grid-astar-router.md) | Accepted |
 | 0032 | [UI test harness built on `iced_test` parts](0032-ui-test-harness-on-iced-test-parts.md) | Accepted (refines the desktop part of 0029) |
+| 0033 | [`Retry-After` from error bodies for litellm-rust providers](0033-retry-after-from-error-bodies-for-litellm-providers.md) | Accepted (refines 0021) |
+| 0034 | [OpenAI models through the Responses API](0034-openai-via-responses-api.md) | Accepted (supersedes 0021 for `openai/`) |

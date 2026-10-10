@@ -5,6 +5,7 @@
 //! clipboard writes recorded).
 #![allow(dead_code)]
 
+pub mod fakes;
 pub mod fixtures;
 
 use std::path::Path;
@@ -12,6 +13,7 @@ use std::path::Path;
 use archalign_desktop::app::{App, Boot, Message};
 use archalign_desktop::view;
 use iced::futures::StreamExt;
+use iced::futures::stream::BoxStream;
 use iced::keyboard::{self, Key, Modifiers};
 use iced::{Event, Point, Size, Task, mouse};
 use iced_test::core::renderer::Headless;
@@ -37,12 +39,31 @@ pub struct Harness {
     /// Every message dispatched, in order (for ordering assertions).
     pub log: Vec<String>,
     rt: tokio::runtime::Runtime,
+    /// Task streams still running (e.g. an agent run waiting on the model).
+    pending: Vec<BoxStream<'static, Action<Message>>>,
+    /// How long one poll waits for a stream before parking it.
+    pub patience: std::time::Duration,
+    /// Set while `pump` runs; nested tasks are queued for the outer pump.
+    pumping: bool,
 }
 
 impl Harness {
     /// Boots the app (running the boot task to completion).
-    pub fn new(boot: Boot) -> Self {
+    pub fn new(mut boot: Boot) -> Self {
         archalign_desktop::fonts::ensure_loaded();
+        // Tests never read the real environment or `.env` files, and never reach the network.
+        if boot.key_env.is_none() {
+            boot.key_env = Some(archalign_desktop::keys::KeyEnv {
+                vars: std::sync::Arc::new(|_| None),
+                launch_dir: None,
+                config_dir: None,
+            });
+        }
+        if boot.llm.is_none() {
+            boot.llm = Some(std::sync::Arc::new(|_| {
+                Err("no network in tests".to_string())
+            }));
+        }
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -65,6 +86,9 @@ impl Harness {
             clipboard: Vec::new(),
             log: Vec::new(),
             rt,
+            pending: Vec::new(),
+            patience: std::time::Duration::from_millis(1500),
+            pumping: false,
         };
         h.run(boot_task);
         h
@@ -77,25 +101,92 @@ impl Harness {
         self.run(task);
     }
 
-    /// Runs a task to completion, dispatching its outputs.
+    /// Runs a task, dispatching its outputs, until it ends or stalls for [`Self::patience`].
     pub fn run_task(&mut self, task: Task<Message>) {
         self.run(task);
     }
 
     fn run(&mut self, task: Task<Message>) {
-        let Some(mut stream) = task::into_stream(task) else {
-            return;
-        };
-        while let Some(action) = self.rt.block_on(stream.next()) {
-            match action {
-                Action::Output(message) => self.send(message),
-                Action::Widget(op) => self.operate(op),
-                Action::Clipboard(iced_test::runtime::clipboard::Action::Write {
-                    contents,
-                    ..
-                }) => self.clipboard.push(contents),
-                _ => {}
+        if let Some(stream) = task::into_stream(task) {
+            self.pending.push(stream);
+        }
+        if !self.pumping {
+            self.pump(self.patience);
+        }
+    }
+
+    /// Polls every pending stream, waiting up to `wait` for each, until none makes
+    /// progress. Streams that stall stay pending (like a long agent run).
+    pub fn pump(&mut self, wait: std::time::Duration) {
+        let outer = !self.pumping;
+        self.pumping = true;
+        self.pump_inner(wait);
+        if outer {
+            self.pumping = false;
+        }
+    }
+
+    fn pump_inner(&mut self, wait: std::time::Duration) {
+        loop {
+            let mut progressed = false;
+            let mut i = 0;
+            while i < self.pending.len() {
+                let mut stream = self.pending.remove(i);
+                let next = self
+                    .rt
+                    .block_on(async { tokio::time::timeout(wait, stream.next()).await });
+                match next {
+                    Ok(Some(action)) => {
+                        self.pending.insert(i, stream);
+                        self.handle(action);
+                        progressed = true;
+                        break;
+                    }
+                    Ok(None) => {
+                        progressed = true;
+                        break;
+                    }
+                    Err(_) => {
+                        self.pending.insert(i, stream);
+                        i += 1;
+                    }
+                }
             }
+            if !progressed {
+                return;
+            }
+        }
+    }
+
+    /// Pumps until `done(app)` holds or `timeout` passes; returns whether it held.
+    pub fn wait_until(
+        &mut self,
+        timeout: std::time::Duration,
+        done: impl Fn(&App) -> bool,
+    ) -> bool {
+        let start = std::time::Instant::now();
+        while !done(&self.app) {
+            if start.elapsed() > timeout {
+                return false;
+            }
+            self.pump(std::time::Duration::from_millis(50));
+        }
+        true
+    }
+
+    /// Number of task streams still running.
+    pub fn pending_tasks(&self) -> usize {
+        self.pending.len()
+    }
+
+    fn handle(&mut self, action: Action<Message>) {
+        match action {
+            Action::Output(message) => self.send(message),
+            Action::Widget(op) => self.operate(op),
+            Action::Clipboard(iced_test::runtime::clipboard::Action::Write {
+                contents, ..
+            }) => self.clipboard.push(contents),
+            _ => {}
         }
     }
 

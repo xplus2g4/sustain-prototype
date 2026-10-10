@@ -13,18 +13,22 @@ use iced::keyboard::{self, Key, Modifiers, key::Named};
 use iced::widget::{Id, operation, pane_grid, scrollable};
 use iced::{Size, Subscription, Task};
 
+use crate::agent_run::{self, LlmFactory, LlmSpec, PreparedRun, RunMsg};
 use crate::diagram::canvas::{CanvasEvent, Hit};
 use crate::diagram::logic::Direction;
 use crate::diagram::{DiagramContent, DiagramMsg, DiagramState, Hover, Selection};
 use crate::ids;
+use crate::keys::{self, KeyEnv};
 use crate::ops::{self, DiagramFailed, DiagramLoaded, RepoOpened};
 use crate::palette::ThemeChoice;
 use crate::panes::{PaneKind, PaneLayout};
+use crate::settings::{Consent, Settings};
 use crate::source::{
     self, Cite, CiteOutcome, OpenText, PlaceholderReason, SourceContent, SourceState,
 };
 use crate::tree::{self, TreeState};
 use crate::virtual_list;
+use archalign_repo::SelfWrites;
 
 /// Maximum number of recent repositories.
 pub const MAX_RECENTS: usize = 10;
@@ -202,8 +206,8 @@ pub enum WatchStatus {
     ManualOnly,
 }
 
-/// What the app needs to start (from `state.json` / `settings.json` in M6).
-#[derive(Debug, Clone, Default)]
+/// What the app needs to start (from `state.json` / `settings.json`).
+#[derive(Clone, Default)]
 pub struct Boot {
     /// Theme.
     pub theme: ThemeChoice,
@@ -211,10 +215,16 @@ pub struct Boot {
     pub last_repo: Option<PathBuf>,
     /// Recent repositories, most recent first.
     pub recent_repos: Vec<PathBuf>,
-    /// Show dotfiles in the tree.
-    pub show_hidden_files: bool,
+    /// User settings.
+    pub settings: Settings,
+    /// Consents granted so far (FR-SEC-03).
+    pub consents: Vec<Consent>,
     /// The git executable (`git` on PATH unless overridden, e.g. by tests).
     pub git_program: Option<std::ffi::OsString>,
+    /// Where API keys are looked up (the process environment unless overridden).
+    pub key_env: Option<KeyEnv>,
+    /// LLM client factory (litellm-rust unless overridden, e.g. by tests).
+    pub llm: Option<LlmFactory>,
 }
 
 /// Every message the app handles.
@@ -226,6 +236,10 @@ pub enum Message {
     KeyPressed(Key, Modifiers, bool),
     /// An event from the diagram canvas.
     Canvas(CanvasEvent),
+    /// Agent run messages.
+    Run(RunMsg),
+    /// Revoke a consent (Settings).
+    RevokeConsent(usize),
     /// A diagram-pane message.
     Diagram(DiagramMsg),
     /// A shortcut after checking whether a text field has focus.
@@ -287,7 +301,6 @@ pub enum Message {
 }
 
 /// The application state.
-#[derive(Debug)]
 pub struct App {
     /// Light or dark.
     pub theme: ThemeChoice,
@@ -318,8 +331,26 @@ pub struct App {
     pub status_message: Option<String>,
     /// Open toolbar dropdown.
     pub menu: Option<Menu>,
-    /// Show dotfiles in the tree.
-    pub show_hidden: bool,
+    /// User settings.
+    pub settings: Settings,
+    /// Consents (FR-SEC-03).
+    pub consents: Vec<Consent>,
+    /// Key lookup.
+    pub key_env: KeyEnv,
+    /// LLM client factory.
+    pub llm: LlmFactory,
+    /// The consent modal, when shown: (provider, model).
+    pub consent_prompt: Option<(String, String)>,
+    /// Abort handle of the active run.
+    pub run_handle: Option<iced::task::Handle>,
+    /// When the active run started.
+    pub run_started_at: Option<std::time::Instant>,
+    /// Run-log drawer lines (FR-GEN-09).
+    pub run_log: Vec<String>,
+    /// Run-log drawer expanded.
+    pub run_drawer_open: bool,
+    /// The app's own writes, for the watcher (FR-WAT-08).
+    pub self_writes: SelfWrites,
     /// Watcher state.
     pub watch: WatchStatus,
     /// The git executable.
@@ -354,7 +385,19 @@ impl App {
             next_banner: 1,
             status_message: None,
             menu: None,
-            show_hidden: boot.show_hidden_files,
+            settings: boot.settings.clone(),
+            consents: boot.consents.clone(),
+            key_env: boot
+                .key_env
+                .clone()
+                .unwrap_or_else(|| KeyEnv::process(None)),
+            llm: boot.llm.clone().unwrap_or_else(agent_run::provider_factory),
+            consent_prompt: None,
+            run_handle: None,
+            run_started_at: None,
+            run_log: Vec::new(),
+            run_drawer_open: false,
+            self_writes: SelfWrites::default(),
             watch: WatchStatus::ManualOnly,
             git_program: boot.git_program.clone().unwrap_or_else(|| "git".into()),
         };
@@ -652,6 +695,13 @@ impl App {
                 Task::none()
             }
             Message::Canvas(event) => self.canvas_event(event),
+            Message::Run(msg) => self.run_msg(msg),
+            Message::RevokeConsent(i) => {
+                if i < self.consents.len() {
+                    self.consents.remove(i);
+                }
+                Task::none()
+            }
             Message::Diagram(msg) => self.diagram_msg(msg),
             Message::DismissBanner(id) => {
                 self.banners.retain(|b| b.id != id);
@@ -715,10 +765,10 @@ impl App {
                 Task::none()
             }
             Action::Relayout => self.relayout(),
-            // Wired in later milestones: Archify/Cancel (M5), Settings and Refresh (M6).
-            Action::Archify | Action::CancelRun | Action::Settings | Action::Refresh => {
-                Task::none()
-            }
+            Action::Archify => self.archify(),
+            Action::CancelRun => self.cancel_run(),
+            // Wired in M6: Settings and Refresh.
+            Action::Settings | Action::Refresh => Task::none(),
         }
     }
 
@@ -728,7 +778,7 @@ impl App {
         }
         self.generation += 1;
         let generation = self.generation;
-        let show_hidden = self.show_hidden;
+        let show_hidden = self.settings.show_hidden_files;
         let git = self.git_program.clone();
         Task::perform(
             ops::blocking(move || ops::open_repo(path, show_hidden, &git)),
@@ -824,7 +874,7 @@ impl App {
         }
         let sandbox = repo.sandbox.clone();
         let generation = self.generation;
-        let show_hidden = self.show_hidden;
+        let show_hidden = self.settings.show_hidden_files;
         Task::perform(
             ops::blocking({
                 let dir = dir.clone();
@@ -1269,6 +1319,255 @@ impl App {
         )
     }
 
+    /// FR-GEN-01: checks the preconditions, asks for consent, creates the diagram folder and
+    /// starts the run. Every failure shows a banner and makes no model call.
+    fn archify(&mut self) -> Task<Message> {
+        if !self.can_archify() {
+            return Task::none();
+        }
+        let Some(repo) = self.repo.clone() else {
+            return Task::none();
+        };
+        let model = self.settings.model.clone();
+        let Some(provider) = archalign_agent::litellm::provider_of(&model) else {
+            self.banner(
+                Some(PaneKind::Diagram),
+                Level::Error,
+                format!(
+                    "Unknown provider in model `{model}`; use a litellm `provider/model` string"
+                ),
+            );
+            return Task::none();
+        };
+        let (_, key) = keys::resolve(&self.key_env, provider.key_env);
+        let Some(key) = key else {
+            let mut places = vec!["the environment".to_string()];
+            places.extend(
+                self.key_env
+                    .launch_dir
+                    .iter()
+                    .map(|d| format!("{}", d.join(".env").display())),
+            );
+            places.extend(
+                self.key_env
+                    .config_dir
+                    .iter()
+                    .map(|d| format!("{}", d.join(".env").display())),
+            );
+            self.banner(
+                Some(PaneKind::Diagram),
+                Level::Error,
+                format!(
+                    "No API key found: set {} in {}",
+                    provider.key_env,
+                    places.join(", or in ")
+                ),
+            );
+            return Task::none();
+        };
+        if !self
+            .consents
+            .iter()
+            .any(|c| c.repo == repo.root && c.provider == provider.name)
+        {
+            self.consent_prompt = Some((provider.name.to_string(), self.settings.model_name()));
+            return Task::none();
+        }
+        let client = match (self.llm)(&LlmSpec {
+            model: model.clone(),
+            key,
+            request_timeout: self.settings.budgets.request_timeout(),
+        }) {
+            Ok(c) => c,
+            Err(e) => {
+                self.banner(
+                    Some(PaneKind::Diagram),
+                    Level::Error,
+                    format!("Can't start the model client: {e}"),
+                );
+                return Task::none();
+            }
+        };
+        let repo_name = repo
+            .root
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("repo")
+            .to_string();
+        let slug = archalign_repo::slugify(&self.focus, &repo_name);
+        let folder = match archalign_repo::create_run_folder(
+            &repo.sandbox,
+            &slug,
+            &archalign_repo::now_run_timestamp(),
+        ) {
+            Ok(f) => f,
+            Err(e) => {
+                self.banner(
+                    Some(PaneKind::Diagram),
+                    Level::Error,
+                    format!("Can't create the diagram folder: {e}"),
+                );
+                return Task::none();
+            }
+        };
+        let (summary, meta, dirty) = agent_run::repo_facts(&repo.git, &repo_name);
+        let repository = match &repo.git {
+            GitStatus::Repo(info) => info.repository(),
+            _ => None,
+        };
+        let cfg = archalign_agent::RunConfig::new(
+            model,
+            self.settings
+                .reasoning_effort
+                .clone()
+                .filter(|s| !s.trim().is_empty()),
+            self.settings.budgets,
+            self.focus.clone(),
+            String::new(),
+            summary.clone(),
+            archalign_model::AppOwned {
+                output: format!(".archify/{}/{}.html", folder.name, folder.slug),
+                repository,
+            },
+            dirty,
+        );
+        let prepared = PreparedRun {
+            cfg,
+            client,
+            sandbox: repo.sandbox.clone(),
+            meta,
+            folder: folder.rel.clone(),
+            writes: self.self_writes.clone(),
+            seed: archalign_agent::prompt::SeedInput {
+                focus: self.focus.clone(),
+                repo_name,
+                short_head: summary.head.as_ref().map(|h| h.chars().take(7).collect()),
+                dirty_count: summary.dirty_count,
+            },
+        };
+        self.run = RunState::Running {
+            turn: 0,
+            max_turns: self.settings.budgets.max_turns,
+            input_tokens: 0,
+            elapsed_s: 0,
+        };
+        self.run_started_at = Some(std::time::Instant::now());
+        self.run_log = vec![format!(
+            "Run started in .archify/{} with {}",
+            folder.name, self.settings.model
+        )];
+        self.run_drawer_open = true;
+        self.menu = None;
+        let (task, handle) = Task::run(agent_run::stream(prepared), |m| m).abortable();
+        self.run_handle = Some(handle);
+        task
+    }
+
+    /// FR-GEN-10: ends the run; the dropped run records `cancelled` and saves nothing.
+    fn cancel_run(&mut self) -> Task<Message> {
+        if let Some(h) = self.run_handle.take() {
+            h.abort();
+        }
+        if self.run.is_running() {
+            self.run = RunState::Idle;
+            self.run_started_at = None;
+            self.run_log.push("✗ cancelled".into());
+            self.banner(
+                Some(PaneKind::Diagram),
+                Level::Info,
+                "Run cancelled; no diagram was saved",
+            );
+        }
+        Task::none()
+    }
+
+    fn run_msg(&mut self, msg: RunMsg) -> Task<Message> {
+        match msg {
+            RunMsg::Tick => {
+                if let (RunState::Running { elapsed_s, .. }, Some(t)) =
+                    (&mut self.run, self.run_started_at)
+                {
+                    *elapsed_s = t.elapsed().as_secs();
+                }
+                Task::none()
+            }
+            RunMsg::ToggleDrawer => {
+                self.run_drawer_open = !self.run_drawer_open;
+                Task::none()
+            }
+            RunMsg::ConsentAccept => {
+                let Some((provider, model)) = self.consent_prompt.take() else {
+                    return Task::none();
+                };
+                if let Some(repo) = &self.repo {
+                    self.consents.push(Consent {
+                        repo: repo.root.clone(),
+                        provider,
+                        model,
+                        granted_at: archalign_repo::now_rfc3339(),
+                    });
+                }
+                self.archify()
+            }
+            RunMsg::ConsentDecline => {
+                self.consent_prompt = None;
+                self.banner(
+                    Some(PaneKind::Diagram),
+                    Level::Info,
+                    "Archify cancelled: nothing was sent. Existing diagrams stay available.",
+                );
+                Task::none()
+            }
+            RunMsg::Event(event) => {
+                if !self.run.is_running() {
+                    return Task::none();
+                }
+                self.run_log.push(agent_run::event_line(&event));
+                match event {
+                    archalign_agent::AgentEvent::TurnStarted { n, .. } => {
+                        if let RunState::Running { turn, .. } = &mut self.run {
+                            *turn = n;
+                        }
+                        Task::none()
+                    }
+                    archalign_agent::AgentEvent::Usage {
+                        input_tokens: n, ..
+                    } => {
+                        if let RunState::Running { input_tokens, .. } = &mut self.run {
+                            *input_tokens = n;
+                        }
+                        Task::none()
+                    }
+                    archalign_agent::AgentEvent::Finished(outcome) => self.run_finished(outcome),
+                    _ => Task::none(),
+                }
+            }
+        }
+    }
+
+    fn run_finished(&mut self, outcome: archalign_agent::RunOutcome) -> Task<Message> {
+        self.run = RunState::Idle;
+        self.run_handle = None;
+        self.run_started_at = None;
+        match outcome {
+            archalign_agent::RunOutcome::Success { candidate } => {
+                // FR-GEN-12: refresh History and open the new diagram.
+                if let Some(repo) = &mut self.repo {
+                    repo.history = archalign_repo::storage::scan_history(&repo.sandbox);
+                }
+                self.open_diagram(candidate)
+            }
+            archalign_agent::RunOutcome::Failed { reason } => {
+                self.banner(
+                    Some(PaneKind::Diagram),
+                    Level::Error,
+                    format!("Archify failed: {reason}"),
+                );
+                Task::none()
+            }
+        }
+    }
+
     /// Subscriptions: keyboard shortcuts and window resizes.
     pub fn subscription(&self) -> Subscription<Message> {
         Subscription::batch([
@@ -1279,6 +1578,12 @@ impl App {
                 _ => None,
             }),
             iced::window::resize_events().map(|(_, size)| Message::WindowResized(size)),
+            if self.run.is_running() {
+                iced::time::every(std::time::Duration::from_secs(1))
+                    .map(|_| Message::Run(RunMsg::Tick))
+            } else {
+                Subscription::none()
+            },
         ])
     }
 

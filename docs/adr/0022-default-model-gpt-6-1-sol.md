@@ -1,6 +1,6 @@
 # 0022. Default model: gpt-6.1-sol
 
-- Status: Accepted
+- Status: Accepted; the transport for `openai/` models is set by [0034](0034-openai-via-responses-api.md)
 - Date: 2026-10-10
 - Related: [0020](0020-built-in-llm-agent-authors-diagrams.md), [0021](0021-litellm-rust-behind-llm-client-trait.md), [0028](0028-agent-run-budgets.md), [0029](0029-testing-strategy-and-live-smoke-runs.md); spec: FR-GEN
 

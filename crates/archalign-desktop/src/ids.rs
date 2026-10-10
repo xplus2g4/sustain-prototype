@@ -126,3 +126,14 @@ pub fn detail_source(j: usize) -> Id {
 pub fn finder_result(k: usize) -> Id {
     Id::from(format!("finder-result:{k}"))
 }
+
+/// Consent modal: Accept.
+pub const CONSENT_ACCEPT: Id = Id::new("consent-accept");
+/// Consent modal: Decline.
+pub const CONSENT_DECLINE: Id = Id::new("consent-decline");
+/// Consent modal body.
+pub const CONSENT_MODAL: Id = Id::new("consent-modal");
+/// Run-log drawer toggle.
+pub const RUN_DRAWER_TOGGLE: Id = Id::new("run-drawer-toggle");
+/// Run-log drawer body.
+pub const RUN_DRAWER: Id = Id::new("run-drawer");

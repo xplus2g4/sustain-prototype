@@ -578,7 +578,7 @@ Accept stores the consent. Decline cancels the run, and viewing stays available.
 `.env` files are parsed with `dotenvy::from_path_iter`, never with `set_var`. The key is passed through `ProviderConfig::with_api_key`. The imported repo's `.env` is never read. The key is never logged, displayed or written by the app.
 - AC: The lookup order and the "not found" case are tested. A test asserts the key never appears in `run.jsonl` or in tracing output captured during a fake run. `[unit]`
 
-**FR-SEC-05 Network.** The only outbound traffic is the provider endpoint called through litellm-rust. No telemetry, update checks or crash reporting.
+**FR-SEC-05 Network.** The only outbound traffic is the provider endpoint, called through litellm-rust or, for `openai/` models, the Responses adapter ([0034](adr/0034-openai-via-responses-api.md)). No telemetry, update checks or crash reporting.
 - AC: No other HTTP client or network call is present: checked by reviewing the dependencies in [libraries.md](libraries.md). `[manual]`
 
 **FR-SEC-06 Logging.** `tracing` writes to stderr only, with the level set by `RUST_LOG`. Logs and `run.jsonl` never contain file contents, tool output bodies or the key.

@@ -10,3 +10,13 @@ publish.workspace = true
 [dependencies]
 archalign-model.workspace = true
 archalign-repo.workspace = true
+litellm-rust.workspace = true
+reqwest.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

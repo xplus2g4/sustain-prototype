@@ -18,8 +18,8 @@ This document justifies every direct dependency, dev-dependency and bundled asse
 | Crate | Version requirement | Features | Used by | Purpose | License | ADR |
 |---|---|---|---|---|---|---|
 | `iced` | `0.14.0` | `canvas`, `tokio`, `advanced` | archalign-desktop | GUI toolkit, diagram canvas, text measurement | MIT | [0005](adr/0005-iced-native-gui-toolkit.md), [0010](adr/0010-fonts-text-measurement-and-palette.md) |
-| `litellm-rust` | `=0.3.0` | none (crate has no features) | archalign-agent | LLM Chat Completions client | MIT | [0021](adr/0021-litellm-rust-behind-llm-client-trait.md) |
-| `reqwest` | `0.12` | `default-features = false`; `rustls-tls`, `json` | archalign-agent | HTTP client handed to litellm (300 s timeout) | MIT OR Apache-2.0 | [0021](adr/0021-litellm-rust-behind-llm-client-trait.md) |
+| `litellm-rust` | `=0.3.0` | none (crate has no features) | archalign-agent | LLM Chat Completions client for non-OpenAI providers | MIT | [0021](adr/0021-litellm-rust-behind-llm-client-trait.md), [0034](adr/0034-openai-via-responses-api.md) |
+| `reqwest` | `0.12` | `default-features = false`; `rustls-tls`, `json` | archalign-agent | HTTP client handed to litellm, and the OpenAI Responses adapter (300 s timeout) | MIT OR Apache-2.0 | [0021](adr/0021-litellm-rust-behind-llm-client-trait.md), [0034](adr/0034-openai-via-responses-api.md) |
 | `tokio` | `1.53` | `rt`, `time` | archalign-agent, archalign-desktop | Async runtime, timers, `spawn_blocking` | MIT | [0008](adr/0008-async-model-tokio-and-iced-tasks.md) |
 | `serde` | `1.0` | `derive` | all crates | (De)serialization of every persisted format | MIT OR Apache-2.0 | [0012](adr/0012-archify-json-v1-canonical-format.md) |
 | `serde_json` | `1.0` | defaults | all crates | JSON for diagrams, settings, state, run log, snapshots | MIT OR Apache-2.0 | [0012](adr/0012-archify-json-v1-canonical-format.md), [0015](adr/0015-diagram-storage-app-state-and-run-log.md) |
@@ -79,13 +79,14 @@ This document justifies every direct dependency, dev-dependency and bundled asse
 
 - **Version and features.** `=0.3.0` (exact pin). The crate declares no features. MSRV 1.88. Released 2026-07-11.
 - **Used by.** archalign-agent, only inside the adapter module behind the `LlmClient` trait.
-- **Purpose.** Sends each agent turn as a non-streaming `LiteLLM::completion(ChatRequest)` with `tools`, `tool_choice`, `parallel_tool_calls`, `max_completion_tokens` and optional `reasoning_effort` (FR-GEN). The model prefix selects the provider (`openai/…`, `anthropic/`, `gemini/`, `openrouter/`, `xai/`, `zai/`). The API key is passed with `ProviderConfig::with_api_key` ([0023](adr/0023-api-key-resolution.md)).
+- **Purpose.** For every provider except `openai/` ([0034](adr/0034-openai-via-responses-api.md)), sends each agent turn as a non-streaming `LiteLLM::completion(ChatRequest)` with `tools`, `tool_choice`, `parallel_tool_calls`, `max_completion_tokens` and optional `reasoning_effort` (FR-GEN). The model prefix selects the provider (`openai/…`, `anthropic/`, `gemini/`, `openrouter/`, `xai/`, `zai/`). The API key is passed with `ProviderConfig::with_api_key` ([0023](adr/0023-api-key-resolution.md)).
 - **Why this one.** One client covers several providers through the litellm `provider/model` string. `ChatRequest` exposes `reasoning_effort` and `extra_body`. It accepts a caller-supplied `reqwest::Client` through `with_client` ([0021](adr/0021-litellm-rust-behind-llm-client-trait.md)).
 - **Alternatives considered.** `async-openai` (the designated fallback), a hand-rolled reqwest client, and official SDKs (none mature; `anthropic` is at 0.0.8).
 - **License.** MIT.
 - **Risks and notes.**
   - Small project: 4,096 total downloads, 6 GitHub stars, a single maintainer (avivsinai). Pre-1.0. Mitigated by the exact pin and by confining it to one adapter module, so a swap touches only that module.
-  - Chat Completions only (`{base}/chat/completions`). No Responses-API features.
+  - Chat Completions only (`{base}/chat/completions`). No Responses-API features. gpt-6.x models reject function tools there unless `reasoning_effort` is `none`, so `openai/` models use our Responses adapter ([0034](adr/0034-openai-via-responses-api.md)).
+  - Response headers are dropped, so `Retry-After` is read from the error body ([0033](adr/0033-retry-after-from-error-bodies-for-litellm-providers.md)).
   - No built-in retry: `send_json_with_retry` executes once. ArchAlign retries 429, 5xx and timeouts itself, up to 3 times with 1 s, 2 s, 4 s backoff, honoring `Retry-After`.
   - The default client times out after 60 s, so ArchAlign supplies its own client (see `reqwest`).
   - `stream_completion` does not surface tool-call deltas, so token streaming is not used.
@@ -96,7 +97,7 @@ This document justifies every direct dependency, dev-dependency and bundled asse
 
 - **Version and features.** `0.12` (resolves to 0.12.28; the latest release is 0.13.5). `default-features = false`, features `rustls-tls` and `json`. MSRV 1.64.0.
 - **Used by.** archalign-agent.
-- **Purpose.** ArchAlign builds its own `reqwest::Client` with a 300 s timeout and passes it to litellm-rust through `with_client`. The 300 s matches the per-request budget ([0028](adr/0028-agent-run-budgets.md)).
+- **Purpose.** ArchAlign builds its own `reqwest::Client` with a 300 s timeout and passes it to litellm-rust through `with_client`. The 300 s matches the per-request budget ([0028](adr/0028-agent-run-budgets.md)). The OpenAI Responses adapter (`archalign-agent/src/openai.rs`) uses the same kind of client directly for `POST /v1/responses` ([0034](adr/0034-openai-via-responses-api.md)).
 - **Why this one.** It is the HTTP client litellm-rust is built on. The version must be 0.12, because litellm-rust 0.3.0 depends on `reqwest@0.12` and a 0.13 `Client` is a different type that `with_client` does not accept.
   - `default-features = false` drops `default-tls` (native-tls), `charset`, `http2` and `system-proxy`.
   - `rustls-tls` is an alias for `rustls-tls-webpki-roots`: rustls with the `ring` provider and the bundled `webpki-roots` certificate set.

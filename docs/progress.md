@@ -111,27 +111,32 @@ How to use this file ([spec §11–§13](spec.md#11-milestones), [0030](adr/0030
 
 ## M5 Agent
 
-- [ ] FR-GEN-01 Preconditions
-- [ ] FR-GEN-02 Focus
-- [ ] FR-GEN-03 Seed message
-- [ ] FR-GEN-04 Tools
-- [ ] FR-GEN-05 Loop
-- [ ] FR-GEN-06 Gate and repair
-- [ ] FR-GEN-07 Budgets
-- [ ] FR-GEN-08 Retries
-- [ ] FR-GEN-09 Progress
-- [ ] FR-GEN-10 Cancel
-- [ ] FR-GEN-11 Concurrency
-- [ ] FR-GEN-12 Success. Opens automatically here; the "top of History" part is checked in M6.
-- [ ] FR-SEC-02 Agent deny-list
-- [ ] FR-SEC-03 Consent
-- [ ] FR-SEC-04 API key
-- [ ] FR-SEC-05 Network
-- [ ] FR-SEC-06 Logging
-- [ ] FR-STO-01 Diagram folder
-- [ ] FR-STO-02 Folder contents
-- [ ] FR-STO-03 Open-file compatibility (`[unit]` part; the `[live]` Archify CLI check is in M7)
-- [ ] Live development runs: Luna on `.smoke_repo/HyperTrack` and `.smoke_repo/cs2103-ip`. Count used: 0 / 20.
+- [x] FR-GEN-01 Preconditions. Evidence: `desktop/tests/agent.rs::{a_missing_key_shows_a_banner_and_makes_no_call, missing_consent_shows_the_modal_and_makes_no_call, an_uncreatable_diagram_folder_shows_a_banner_and_makes_no_call}`. The client is built before the folder is created; an unknown provider prefix is also a banner (`App::archify`).
+- [x] FR-GEN-02 Focus. Evidence: `desktop/tests/agent.rs::a_successful_run_saves_logs_and_opens_the_diagram` (the typed Focus is in the seed and in `run_started`, and drives the folder slug).
+- [x] FR-GEN-03 Seed message. Evidence: `agent/tests/tools.rs::{seed_contains_focus_tree_readme_and_manifests_but_no_denied_files, seed_is_capped_at_48kb}`; through the UI in `a_successful_run_saves_logs_and_opens_the_diagram`.
+- [x] FR-GEN-04 Tools. Evidence: `agent/tests/tools.rs` (11 tests: `list_dir`, `read_file` 400-line/24 KB caps, `grep` 100-match cap and bad patterns, `repo_meta` 200 dirty paths, unknown tools, the 24 KB cap on every result); `repo/tests/agent_fs.rs` (16 tests).
+- [x] FR-GEN-05 Loop. Evidence: `agent/tests/run.rs::{success_saves_the_candidate_and_logs_every_event_in_order, a_text_only_reply_gets_a_reminder_and_counts_as_a_turn, invalid_tool_arguments_cost_a_turn_but_not_a_repair}`.
+- [x] FR-GEN-06 Gate and repair. Evidence: `agent/tests/run.rs::{rejections_return_errors_to_the_model_and_repairs_can_succeed, the_fourth_rejection_fails_the_run}`; `desktop/tests/agent.rs::a_failed_run_shows_the_reason_and_saves_only_the_log`.
+- [x] FR-GEN-07 Budgets. Evidence: `agent/tests/run.rs::{the_turn_cap_fails_the_run, the_input_token_cap_fails_the_run, the_wall_clock_cap_fails_the_run, the_per_request_timeout_is_retried_then_fails_the_run}`.
+- [x] FR-GEN-08 Retries. Evidence: `agent/src/retry.rs` tests (`retries_429_5xx_and_timeouts_with_1_2_4_backoff`, `honors_retry_after`, `gives_up_after_three_retries`, `does_not_retry_client_errors`, `an_elapsed_attempt_is_a_retryable_timeout`); `agent/tests/run.rs::http_429_with_retry_after_waits_that_long_and_continues`; `Retry-After` header for OpenAI in `agent/src/openai.rs::complete_posts_to_responses_and_reads_retry_after`; body hints for litellm providers (ADR 0033).
+- [x] FR-GEN-09 Progress. Evidence: `desktop/tests/agent.rs::a_successful_run_saves_logs_and_opens_the_diagram` (drawer lines in event order); status-bar progress in `cancel_stops_the_run_and_the_app_stays_usable_meanwhile`. Screenshots reviewed: `target/smoke/m5/{run-in-progress,run-success}.png`.
+- [x] FR-GEN-10 Cancel. Evidence: `desktop/tests/agent.rs::cancel_stops_the_run_and_the_app_stays_usable_meanwhile` (Cancel button and ⌘.; idle in < 1 s; the stream is dropped; `run.jsonl` ends `cancelled`; no candidate); `agent/tests/run.rs::cancelling_stops_within_a_second_and_saves_nothing`.
+- [x] FR-GEN-11 Concurrency. Evidence: `cancel_stops_the_run_and_the_app_stays_usable_meanwhile` (tree and source work during the run; Open repo disabled; Archify becomes Cancel, so a second run can't start).
+- [x] FR-GEN-12 Success. Opens automatically and is first in the rescanned History list. Evidence: `a_successful_run_saves_logs_and_opens_the_diagram`. The History picker UI itself is M6.
+- [x] FR-SEC-02 Agent deny-list. Evidence: `repo/tests/deny.rs` (8 tests: every pattern, case-insensitivity, any depth, links to denied targets); `agent/tests/tools.rs::deny_listed_paths_are_hidden_from_every_tool` (every pattern × every tool; direct reads return `denied` and are logged).
+- [x] FR-SEC-03 Consent. Evidence: `desktop/tests/agent.rs::{missing_consent_shows_the_modal_and_makes_no_call, consent_accept_decline_and_revoke}`. Screenshot reviewed: `target/smoke/m5/consent.png`. Persisting consents to `state.json` and the Settings Revoke button are M6 (FR-STO-05/06); `Message::RevokeConsent` is in place.
+- [x] FR-SEC-04 API key. Evidence: `desktop/src/keys.rs` unit tests (`lookup_order_is_environment_then_launch_dir_then_config_dir`, `not_found_when_no_source_has_the_key`, `the_key_is_redacted_in_debug_output`; `.env` files are read with `dotenvy::from_path_iter`, which never sets variables); `desktop/tests/agent.rs::the_key_never_appears_in_the_run_log_or_tracing_output` (TRACE-level capture); `agent/src/openai.rs::debug_never_shows_the_key`.
+- [x] FR-SEC-05 Network. Implementer's review (the owner's `[manual]` review is still due): `cargo tree --workspace -e normal` has one HTTP stack, `reqwest` 0.12.28 → `hyper` 1.12 / `hyper-rustls`, used only by `archalign-agent` (the Responses adapter, ADR 0034) and `litellm-rust`. No native-tls/openssl, no telemetry, updater or crash-reporting crates. Tests can't reach the network: the harness injects an empty key environment and a refusing LLM factory.
+- [x] FR-SEC-06 Logging. Evidence: `agent/tests/run.rs::the_key_and_file_contents_never_reach_the_run_log`; `the_key_never_appears_in_the_run_log_or_tracing_output`; live `run.jsonl` files contain no file contents, encrypted reasoning or key (checked on the HyperTrack run: 7.4 KB, events only).
+- [x] FR-STO-01 Diagram folder. Evidence: `repo/tests/run_storage.rs` (slug, timestamp, collisions, unusable `.archify`); the folder name pattern in `a_successful_run_saves_logs_and_opens_the_diagram`.
+- [x] FR-STO-02 Folder contents. Evidence: `a_successful_run_saves_logs_and_opens_the_diagram` (`candidate.json` + `run.jsonl`; `meta.output` points at the never-written `<slug>.html`); `a_failed_run_shows_the_reason_and_saves_only_the_log`.
+- [x] FR-STO-03 Open-file compatibility, `[unit]` part. Evidence: `a_successful_run_saves_logs_and_opens_the_diagram` (the saved file passes the vendored schema; every component has `pos`/`size`); also checked on both live candidates. The `[live]` Archify CLI check is in M7.
+- [x] Live development runs: Luna on `.smoke_repo/HyperTrack` and `.smoke_repo/cs2103-ip`. Count used: 3 / 20.
+  1. HyperTrack: failed on turn 1 with HTTP 400 (gpt-6 rejects function tools on Chat Completions). This led to ADR 0034, chosen by the owner.
+  2. HyperTrack: success in 43 s, 6 turns, 73.8k input / 3.7k output tokens, 11 components. 3 node clicks opened the right file and band.
+  3. cs2103-ip: success in 36 s, 7 turns, 38.0k input / 2.8k output tokens, 7 components. 3 node clicks verified.
+
+  Screenshots reviewed: `target/smoke/{HyperTrack,cs2103-ip}/{diagram,node-1,node-2,node-3}.png`. Command: `ARCHALIGN_LIVE=1 ARCHALIGN_LIVE_REPO=… cargo test -p archalign-desktop --release --test live -- --ignored --nocapture` (one run per invocation).
 
 ## M6 History, settings, state, watcher
 
@@ -196,3 +201,10 @@ How to use this file ([spec §11–§13](spec.md#11-milestones), [0030](adr/0030
   - Keyboard path changed to `event::listen_with` (keys carry their capture status) so Esc can close the finder even when the field captured it; the harness forwards the same status.
   - Screenshots reviewed: `target/smoke/m4/{web-app,production-deployment,archify-repo-grid,archify-runtime,node-click,tooltip,reach,edge-click,problems,tree-markers,reverse-highlight}.png`.
   - Gates: fmt, clippy `-D warnings`, `cargo test --workspace` green; perf: NFR-PERF-04 0.40 ms (others unchanged).
+- **2026-10-10. M5 Agent.**
+  - `archalign-agent`: the `LlmClient` seam (boxed future), retry wrapper with an injectable sleeper, tools over `agent_fs`, prompt and seed, submission gate (model checks + citations through `RepoProbe`), the loop with all budgets, `RunLog` (`cancelled` on drop). `archalign-repo`: `DenyList`, `agent_fs`, run-folder storage, `SelfWrites`.
+  - `archalign-desktop`: `settings`, `keys`, `agent_run`; the Archify flow with preconditions, consent modal, run-log drawer, 1 s tick, Cancel/⌘., and success opening the new diagram.
+  - Live run 1 failed: gpt-6 models reject function tools on `/v1/chat/completions` unless `reasoning_effort` is `none`. The owner chose a Responses API adapter for `openai/` (ADR 0034). litellm-rust drops response headers, so `Retry-After` comes from error bodies for the other providers (ADR 0033).
+  - Harness: pending task streams are parked and pumped (`pump`, `wait_until`), so long runs and Cancel can be simulated. It never reads the real environment or `.env`, and never reaches the network.
+  - Finding for M7: both live candidates fail Archify's `composition/desktop-readability` check (viewBox 2903 px wide for HyperTrack; projected 8 px edge text at 3.7 px). The schema and render stages pass. In the app, the fitted HyperTrack diagram is too small for labels in the default pane width.
+  - Gates: fmt, clippy `-D warnings`, `cargo test --workspace` green.

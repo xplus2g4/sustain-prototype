@@ -74,7 +74,10 @@ fn ignored_files_git_and_dotfiles_are_hidden_unless_enabled() {
     h.send(Message::TreeToggle(rel("sub")));
     assert_eq!(names(&h), ["sub", "ok.txt", "main.rs"]);
     let mut h = Harness::new(Boot {
-        show_hidden_files: true,
+        settings: archalign_desktop::settings::Settings {
+            show_hidden_files: true,
+            ..Default::default()
+        },
         ..Boot::default()
     });
     h.send(Message::OpenRepo(r.root.clone()));

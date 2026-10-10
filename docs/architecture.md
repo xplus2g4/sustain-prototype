@@ -127,7 +127,13 @@ The type names below are the intended public surface. The implementer may refine
 - `resolve` canonicalizes and checks the root prefix, so symlinks that resolve outside the root are rejected; `is_outside_link` flags such links for the tree.
 - UI reads, agent tools and citation checks all go through it ([FR-SEC-01](spec.md#711-fr-sec-security-and-privacy)). `SandboxError` messages are user-facing (shown in banners).
 
-**`DenyList`.** The fixed agent deny-list ([0025](adr/0025-agent-tool-sandbox-and-deny-list.md)). Only the agent's tool set applies it; the UI doesn't. (Added in M5; `RepoProbe::is_denied` returns false until then.)
+**`DenyList` (`deny`).** The fixed agent deny-list ([0025](adr/0025-agent-tool-sandbox-and-deny-list.md)): `.git/`, `.archify/`, `.env*` (except `.env.example`/`.env.sample`), key files, SSH keys and credential rc files, matched case-insensitively on any path segment. `is_denied_in` also checks the target of a symlink. Only the agent's tool set and `RepoProbe` apply it; the UI doesn't.
+
+**`agent_fs`.** The agent's file-system views, all through `Sandbox` + `DenyList` + the ignore rules:
+- `list_for_agent` (one level, folders first, sizes, at most `LIST_DIR_MAX` entries with an omitted count);
+- `seed_tree` (depth 2, 400 entries, shallow levels first);
+- `grep` (`regex` with a size limit; deterministic path order; skips binary and large files; capped matches, line length and time);
+- `head_lines` (README and manifests for the seed).
 
 **`tree`.** `list_dir(sandbox, dir, opts)`: one level, `ignore::WalkBuilder` with nested `.gitignore`, `.git/info/exclude` and the global gitignore; `.git` never listed; dotfiles only with `show_hidden`; folders (and links to folders) first, then files, case-insensitively; links are never followed and carry `outside_root`. `is_ignored` applies the same rules to one path (for the watcher).
 
@@ -146,7 +152,8 @@ The type names below are the intended public surface. The implementer may refine
 **`storage`.**
 - `scan_history` lists `.archify/*/candidate.json` newest first (timestamp suffix, then mtime) with a `Valid`/`Invalid`/`Unsupported` status; `newest_valid` picks the one to open on import (FR-IMP-03).
 - `atomic_write`: temp file in the same folder, `sync_all`, rename.
-- Run-folder naming (slug, `jiff` local time, collision suffixes) and a `SelfWrites` registry of (path, len, mtime) for the watcher (M5/M6).
+- Run folders: `slugify(focus, repo name)` (at most 40 chars on a word boundary), `now_run_timestamp` (`jiff` local time, `YYYYMMDD-HHMMSS`), `create_run_folder` (creates `.archify/`, numbered suffix on collision) and `append_line` for `run.jsonl` (FR-STO-01/02).
+- `SelfWrites` records (path, len, mtime) of the app's own writes (`atomic_write_tracked`) so the watcher can ignore them (FR-WAT-08, wired in M6).
 
 **`watch`.** `RepoWatcher` wraps `notify-debouncer-mini` (300 ms).
 - Filters events with the ignore rules, always keeping `.archify/` and keeping only `.git/HEAD` and `.git/index` under `.git/`.
@@ -157,15 +164,16 @@ The type names below are the intended public surface. The implementer may refine
 
 **Purpose.** Run one diagram-authoring conversation with an LLM, safely and within budget. No GUI.
 
-**`LlmClient`.** `async fn complete(&self, turn: TurnRequest) -> Result<TurnResponse, LlmError>`.
-- `TurnResponse` carries the text, the typed `ToolCall`s and the usage.
-- Tests use the trait through generics with a scripted fake.
+**`LlmClient` (`llm`).** `fn complete(&self, TurnRequest) -> BoxFuture<Result<TurnResponse, LlmError>>` (boxed so the trait is object-safe; the desktop holds an `Arc<dyn LlmClient>`).
+- `TurnResponse` carries the text, the typed `ToolCall`s, the usage and opaque `replay` items (OpenAI encrypted reasoning) that go back with the next turn.
+- Tests use a scripted fake.
 
-**`LiteLlmClient`.** The only module that touches litellm-rust ([0021](adr/0021-litellm-rust-behind-llm-client-trait.md)).
-- Calls `LiteLLM::completion` with our own `reqwest` 0.12 client (300 s timeout).
-- Retries 429, 5xx and timeouts with 1/2/4 s backoff, honoring `Retry-After`.
-- Parses `tool_calls` from the OpenAI-shaped `serde_json::Value`.
-- Takes the key explicitly.
+**`client_for(model, key, timeout)`** picks the adapter by provider:
+- **`OpenAiResponsesClient` (`openai`)** for `openai/…`: `POST /v1/responses` with our reqwest 0.12 client (300 s timeout), `store: false`, encrypted reasoning replayed, real `Retry-After` header ([0034](adr/0034-openai-via-responses-api.md)).
+- **`LiteLlmClient` (`litellm`)** for every other provider, the only module that touches litellm-rust ([0021](adr/0021-litellm-rust-behind-llm-client-trait.md)): `LiteLLM::completion` with our reqwest client; `tool_calls` parsed from the OpenAI-shaped value; `Retry-After` recovered from the error body ([0033](adr/0033-retry-after-from-error-bodies-for-litellm-providers.md)).
+- Both take the key explicitly and never print it (`Debug` hides it).
+
+**`retry`.** `complete_with_retry` retries 429, 5xx and timeouts up to 3 times (1/2/4 s or `Retry-After`), each attempt bounded by the per-request timeout, through an injectable `Sleeper` (FR-GEN-08).
 
 **`ToolSet`.** `list_dir`, `read_file`, `grep`, `repo_meta` and `submit_diagram`, built over `Sandbox` plus `DenyList`, with their caps. It also supplies the OpenAI function schemas sent with every turn (FR-GEN-04).
 
@@ -181,8 +189,8 @@ The type names below are the intended public surface. The implementer may refine
 
 It returns accepted, or a list of `Issue`s ([0027](adr/0027-submission-gate-and-repair-loop.md)).
 
-**`run`.** `run_agent(config, client, tools, hooks, events) -> RunOutcome`. This is the loop, and it enforces the budgets ([0028](adr/0028-agent-run-budgets.md)).
-- It emits `AgentEvent`s on a channel.
+**`run`.** `run_agent(cfg, client, tools, finalize, sink, log, sleeper) -> RunOutcome`. This is the loop, and it enforces the budgets ([0028](adr/0028-agent-run-budgets.md)): turns and input tokens per turn, the wall clock as a `tokio::time::timeout` around the whole conversation, and the repair budget (the 4th rejection fails). Cancelling is dropping the future; `RunLog`'s `Drop` then records `cancelled`.
+- It emits `AgentEvent`s through an `EventSink`.
 - It writes `run.jsonl` through `RunLog`.
 - On acceptance it calls the desktop-supplied `hooks.finalize(doc)`, which lays out and saves the diagram, then logs `run_finished`.
 
@@ -198,7 +206,8 @@ The crate is a library (`src/lib.rs`, so tests can drive `App`) plus the `archal
 - **State:** `RepoSession` (`Sandbox`, `GitStatus`, history), `PaneLayout`, `TreeState`, `SourceState`, `DiagramState`, `RunState`, recents, Focus text, banners, theme, a `generation` counter (async results from a previous repo are dropped), and the git program (overridable for tests).
 - **`Message`:** one enum. User actions are `Message::Action(Action)`; toolbar buttons and shortcuts send the same `Action` (FR-PANE-09).
 - **Shortcuts:** `keyboard::listen()` delivers key presses no widget captured. `shortcut_action` maps them to an `Action`, disabled actions are dropped, and an `is_focused` check over the visible text fields runs before dispatch, so global shortcuts don't fire while typing (§9).
-- **`Boot`:** last repo, recents, theme and "show hidden files" (filled from `state.json`/`settings.json` in M6).
+- **`Boot`:** last repo, recents, theme, `Settings`, consents, and test overrides for the git program, the key environment (`KeyEnv`) and the LLM factory (filled from `state.json`/`settings.json` in M6).
+- **Archify** (`App::archify`, FR-GEN-01): provider from the model prefix → key (`keys::resolve`) → consent (else the consent modal) → client from the `LlmFactory` → `create_run_folder` → `Task::run(agent_run::stream(prepared)).abortable()`. Each failure is a banner and no model call. `RunMsg` events update `RunState` and the run-log drawer; a 1 s `time::every` tick updates the elapsed time; Cancel/⌘. aborts the handle; success rescans History and opens the candidate.
 - All file-system work runs in `Task::perform` + `spawn_blocking` (`ops`: `open_repo`, `list`, `read_file`, `load_diagram`); results come back as messages.
 
 **Modules:**
@@ -219,11 +228,17 @@ The crate is a library (`src/lib.rs`, so tests can drive `App`) plus the `archal
 
 **Re-layout** (`ops::relayout`): strip geometry → layout → `write_back` → `atomic_write` → reload through the Import profile.
 
-**Planned (later milestones):** `persist` (`state.json`, `settings.json`, a serde mirror of the pane layout because `pane_grid::Configuration` has no serde support ([0006](adr/0006-three-pane-grid-layout.md))); `keys` (environment, launch-directory `.env`, config-dir `.env` via `dotenvy::from_path_iter` ([0023](adr/0023-api-key-resolution.md))); modals (consent, settings); the run-log drawer; the watcher subscription.
+**M5 modules:**
+- `settings`: `Settings` (model, `reasoning_effort`, budgets, show hidden files) and `Consent` (repo root, provider, model, time);
+- `keys`: `KeyEnv` (environment lookup, launch dir, config dir) and `resolve` (environment, then launch-directory `.env`, then config-dir `.env`, read with `dotenvy::from_path_iter` without touching the process environment ([0023](adr/0023-api-key-resolution.md))); `ApiKey`'s `Debug` is redacted;
+- `agent_run`: `LlmSpec`/`LlmFactory` (`provider_factory` in production), `PreparedRun`, the `stream()` that runs `run_agent` on the tokio runtime and forwards events as `RunMsg`, `DesktopFinalize` (layout, `write_back` of integer `pos`/`size`, `atomic_write_tracked` of `candidate.json`), `event_line` for the drawer, and `repo_facts`;
+- `view`: the consent modal (`modal_layer`: an `opaque` backdrop in a `stack`) and the run-log drawer at the bottom of the Diagram pane.
 
-**Subscriptions:** keyboard shortcuts and window resizes now; window close (for persistence) and `Subscription::run_with(repo_root, watch_stream)` for watcher batches later.
+**Planned (M6):** `persist` (`state.json`, `settings.json`, a serde mirror of the pane layout because `pane_grid::Configuration` has no serde support ([0006](adr/0006-three-pane-grid-layout.md))); the Settings modal; the watcher subscription.
 
-**Tests.** `tests/common/` holds the UI harness ([0032](adr/0032-ui-test-harness-on-iced-test-parts.md)): `iced_test`'s headless renderer and a persisted `UserInterface`, with the app's real tasks executed. Screenshots go to `target/smoke/`.
+**Subscriptions:** keyboard shortcuts, window resizes and the 1 s run tick now; window close (for persistence) and `Subscription::run_with(repo_root, watch_stream)` for watcher batches later.
+
+**Tests.** `tests/common/` holds the UI harness ([0032](adr/0032-ui-test-harness-on-iced-test-parts.md)): `iced_test`'s headless renderer and a persisted `UserInterface`, with the app's real tasks executed. Streams that stall (an agent run waiting on the model) stay pending and are pumped by `pump`/`wait_until`, so long-running tasks and Cancel can be tested. Tests never read the real environment or `.env` and never reach the network unless a test injects a key environment and an LLM factory. `tests/live.rs` is the opt-in live run (`ARCHALIGN_LIVE=1`, `#[ignore]`). Screenshots go to `target/smoke/`.
 
 ## 4. Main flows
 
@@ -266,7 +281,7 @@ sequenceDiagram
   D->>R: storage.create_run_folder(slug, now)
   D->>A: Task::run(run_agent stream), Task::abortable
   loop until accepted, failed, cancelled or a budget cap
-    A->>P: completion(messages, tools)
+    A->>P: complete(messages, tools) via client_for (Responses or litellm)
     P-->>A: text + tool_calls + usage
     A->>R: list_dir / read_file / grep / repo_meta (Sandbox + DenyList)
     A-->>D: AgentEvent (turn, tool_call, usage)

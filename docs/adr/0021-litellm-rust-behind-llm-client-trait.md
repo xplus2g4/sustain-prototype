@@ -1,6 +1,6 @@
 # 0021. litellm-rust behind an `LlmClient` trait
 
-- Status: Accepted
+- Status: Accepted; superseded for the `openai/` provider by [0034](0034-openai-via-responses-api.md); retries refined by [0033](0033-retry-after-from-error-bodies-for-litellm-providers.md)
 - Date: 2026-10-10
 - Related: [0003](0003-cargo-workspace-and-crate-boundaries.md), [0008](0008-async-model-tokio-and-iced-tasks.md), [0020](0020-built-in-llm-agent-authors-diagrams.md), [0022](0022-default-model-gpt-6-1-sol.md), [0023](0023-api-key-resolution.md); spec: FR-GEN
 

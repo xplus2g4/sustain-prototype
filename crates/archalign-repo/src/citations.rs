@@ -2,6 +2,7 @@
 
 use archalign_model::{FileProbe, SourceProbe};
 
+use crate::deny::DenyList;
 use crate::sandbox::{RelPath, Sandbox, SandboxError};
 use crate::text::{RawLoad, count_lines, read_raw};
 
@@ -49,9 +50,10 @@ impl SourceProbe for RepoProbe<'_> {
         }
     }
 
-    /// Always `false` for now: milestone M5 wires the agent deny-list (FR-SEC-02) here.
-    fn is_denied(&self, _path: &str) -> bool {
-        false
+    /// The agent deny-list (FR-SEC-02). Only the Submission profile consults it, so the
+    /// UI is unaffected.
+    fn is_denied(&self, path: &str) -> bool {
+        DenyList::new().is_denied_str(path)
     }
 }
 

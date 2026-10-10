@@ -339,6 +339,143 @@ fn title_bar<'a>(
     })
 }
 
+fn run_drawer<'a>(app: &'a App, p: &'a Palette) -> Option<Element<'a, Message>> {
+    if app.run_log.is_empty() {
+        return None;
+    }
+    let header = row![
+        container(
+            button(
+                text(format!(
+                    "{} Run log ({})",
+                    if app.run_drawer_open { "▾" } else { "▸" },
+                    app.run_log.len()
+                ))
+                .size(11)
+            )
+            .on_press(Message::Run(crate::agent_run::RunMsg::ToggleDrawer))
+            .padding(Padding::from([2, 8]))
+            .style(button::text)
+        )
+        .id(ids::RUN_DRAWER_TOGGLE),
+        text(run_label(app)).size(11).font(MONO).color(p.text_muted),
+    ]
+    .spacing(8)
+    .align_y(Alignment::Center);
+    let mut col = column![header];
+    if app.run_drawer_open {
+        let mut lines = column![].spacing(1);
+        let skip = app.run_log.len().saturating_sub(200);
+        for l in &app.run_log[skip..] {
+            lines = lines.push(text(l.clone()).size(11).font(MONO).color(p.text_muted));
+        }
+        col = col.push(
+            container(
+                iced::widget::scrollable(lines)
+                    .anchor_bottom()
+                    .height(160)
+                    .width(Length::Fill),
+            )
+            .id(ids::RUN_DRAWER)
+            .padding(Padding::from([2, 8])),
+        );
+    }
+    Some(
+        container(col)
+            .width(Length::Fill)
+            .style(move |_| container::Style {
+                background: Some(Background::Color(p.panel)),
+                border: Border {
+                    color: p.panel_border,
+                    width: 1.0,
+                    radius: 0.0.into(),
+                },
+                ..container::Style::default()
+            })
+            .into(),
+    )
+}
+
+fn consent_modal<'a>(app: &'a App, p: &'a Palette) -> Option<Element<'a, Message>> {
+    let (provider, model) = app.consent_prompt.as_ref()?;
+    let bullet = |s: &str| text(format!("• {s}")).size(12).color(p.text);
+    let card = column![
+        text("Send repository data to the model provider?")
+            .size(16)
+            .font(MONO_BOLD)
+            .color(p.text),
+        text(format!("Provider: {provider} · Model: {model}"))
+            .size(12)
+            .font(MONO)
+            .color(p.text_muted),
+        text("What is sent").size(13).font(MONO_BOLD).color(p.text),
+        bullet("contents of the files the agent reads"),
+        bullet("file paths and grep matches"),
+        bullet("git metadata: HEAD, the origin URL without credentials, dirty paths"),
+        bullet("your Focus text"),
+        text("What is never sent")
+            .size(13)
+            .font(MONO_BOLD)
+            .color(p.text),
+        bullet(".git/ and .archify/"),
+        bullet(".env and .env.* (except .env.example and .env.sample)"),
+        bullet("*.pem, *.key, *.p12, *.pfx, id_rsa*, id_ed25519*"),
+        bullet(".npmrc, .pypirc, .netrc"),
+        text("You can revoke this consent in Settings.")
+            .size(11)
+            .color(p.text_muted),
+        row![
+            container(
+                button(text("Decline").size(12))
+                    .on_press(Message::Run(crate::agent_run::RunMsg::ConsentDecline))
+                    .style(button::secondary)
+            )
+            .id(ids::CONSENT_DECLINE),
+            container(
+                button(text("Accept and run").size(12))
+                    .on_press(Message::Run(crate::agent_run::RunMsg::ConsentAccept))
+            )
+            .id(ids::CONSENT_ACCEPT),
+        ]
+        .spacing(10),
+    ]
+    .spacing(8)
+    .max_width(560);
+    Some(modal_layer(card.into(), p, ids::CONSENT_MODAL))
+}
+
+/// A centered card over a dimmed, input-blocking backdrop.
+pub fn modal_layer<'a>(
+    content: Element<'a, Message>,
+    p: &'a Palette,
+    id: iced::widget::Id,
+) -> Element<'a, Message> {
+    iced::widget::opaque(
+        container(
+            container(content)
+                .id(id)
+                .padding(20)
+                .style(move |_| container::Style {
+                    background: Some(Background::Color(p.mask)),
+                    border: Border {
+                        color: p.panel_border,
+                        width: 1.0,
+                        radius: 8.0.into(),
+                    },
+                    ..container::Style::default()
+                }),
+        )
+        .center(Length::Fill)
+        .style(move |_| container::Style {
+            background: Some(Background::Color(Color {
+                a: 0.6,
+                ..Color::BLACK
+            })),
+            ..container::Style::default()
+        }),
+    )
+}
+
 fn pane_body<'a>(app: &'a App, kind: PaneKind, p: &'a Palette) -> Element<'a, Message> {
     let content: Element<'a, Message> = match kind {
         PaneKind::Tree => tree::view(&app.tree, p, app.pane_body_height(PaneKind::Tree)),
@@ -352,6 +489,10 @@ fn pane_body<'a>(app: &'a App, kind: PaneKind, p: &'a Palette) -> Element<'a, Me
                 can_archify: app.can_archify(),
             },
         ),
+    };
+    let content = match (kind, run_drawer(app, p)) {
+        (PaneKind::Diagram, Some(drawer)) => column![content, drawer].into(),
+        _ => content,
     };
     match banners_for(app, Some(kind), p) {
         Some(b) => column![b, content].into(),
@@ -478,7 +619,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
     };
     col = col.push(container(body).height(Length::Fill).width(Length::Fill));
     col = col.push(status_bar(app, p));
-    container(col)
+    let base: Element<'_, Message> = container(col)
         .width(Length::Fill)
         .height(Length::Fill)
         .style(move |_| container::Style {
@@ -486,5 +627,9 @@ pub fn view(app: &App) -> Element<'_, Message> {
             text_color: Some(p.text),
             ..container::Style::default()
         })
-        .into()
+        .into();
+    match consent_modal(app, p) {
+        Some(m) => iced::widget::stack![base, m].into(),
+        None => base,
+    }
 }

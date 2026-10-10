@@ -64,7 +64,12 @@ fn repo_probe_end_to_end() {
             size: MAX_VIEW_BYTES + 1
         }
     );
-    assert!(!probe.is_denied(".env"));
+    // FR-SEC-02: the probe consults the deny-list (only the Submission profile asks).
+    assert!(probe.is_denied(".env"));
+    assert!(probe.is_denied("config/.env.local"));
+    assert!(probe.is_denied("../outside"));
+    assert!(!probe.is_denied(".env.example"));
+    assert!(!probe.is_denied("src/a.rs"));
 
     let dirty: HashSet<String> = ["src/dirty.rs".to_string()].into();
     let issues = check_citations(&doc(), &probe, Profile::Submission, &dirty);
