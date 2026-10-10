@@ -12,6 +12,8 @@
 //! - [`deny`]: the agent deny-list (FR-SEC-02).
 //! - [`agent_fs`]: listing, seed tree, grep and file heads for the agent (FR-GEN-03,
 //!   FR-GEN-04).
+//! - [`watch`]: debounced, filtered repository watch and git-refresh limiter (FR-WAT-01,
+//!   FR-WAT-02, FR-WAT-07, FR-WAT-08, FR-WAT-09).
 
 pub mod agent_fs;
 pub mod citations;
@@ -21,6 +23,7 @@ pub mod sandbox;
 pub mod storage;
 pub mod text;
 pub mod tree;
+pub mod watch;
 
 pub use citations::RepoProbe;
 pub use deny::DenyList;
@@ -33,3 +36,7 @@ pub use storage::{
 };
 pub use text::{LineIndex, MAX_VIEW_BYTES, TextLoad, load_text};
 pub use tree::{DirEntry, EntryKind, TreeOptions, is_ignored, list_dir};
+pub use watch::{
+    BURST_PATHS, Changes, DEBOUNCE, GIT_REFRESH_INTERVAL, GitRefreshLimiter, RepoWatcher,
+    WatchBatch, WatchError, classify,
+};

@@ -12,17 +12,20 @@ pub mod keys;
 pub mod ops;
 pub mod palette;
 pub mod panes;
+pub mod persist;
 pub mod settings;
 pub mod source;
 pub mod tree;
 pub mod view;
 pub mod virtual_list;
+pub mod watch;
 
 /// Maximum Focus length in characters (Appendix C, Tunable).
 pub const FOCUS_MAX_CHARS: usize = 500;
 
 /// Starts the application.
 pub fn run(boot: app::Boot) -> iced::Result {
+    let window = boot.window.unwrap_or(app::DEFAULT_WINDOW);
     iced::application(
         move || app::App::new(boot.clone()),
         app::App::update,
@@ -34,6 +37,6 @@ pub fn run(boot: app::Boot) -> iced::Result {
     .font(fonts::REGULAR_BYTES)
     .font(fonts::BOLD_BYTES)
     .default_font(fonts::MONO)
-    .window_size(app::DEFAULT_WINDOW)
+    .window_size(window)
     .run()
 }

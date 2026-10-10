@@ -268,6 +268,10 @@ fn each_shortcut_triggers_the_same_action_as_its_button() {
             .collect();
         assert_eq!(by_button, vec![format!("Action({name})")], "button");
         assert_eq!(by_key, by_button, "shortcut for {name}");
+        // Close the Settings modal so the next button is reachable.
+        h.send(Message::Settings(
+            archalign_desktop::app::SettingsMsg::Cancel,
+        ));
     }
     // ⌘2 / ⌘3, ⌘R, ⌘⇧L, ⌘. map to their actions too.
     for (c, shift, name) in [

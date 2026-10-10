@@ -137,3 +137,31 @@ pub const CONSENT_MODAL: Id = Id::new("consent-modal");
 pub const RUN_DRAWER_TOGGLE: Id = Id::new("run-drawer-toggle");
 /// Run-log drawer body.
 pub const RUN_DRAWER: Id = Id::new("run-drawer");
+
+/// A History entry.
+pub fn history_entry(i: usize) -> Id {
+    Id::from(format!("history:{i}"))
+}
+
+/// Settings modal body.
+pub const SETTINGS_MODAL: Id = Id::new("settings-modal");
+/// Settings: model field.
+pub const SETTINGS_MODEL: Id = Id::new("settings-model");
+/// Settings: reasoning effort field.
+pub const SETTINGS_EFFORT: Id = Id::new("settings-effort");
+/// Settings: show hidden files toggle.
+pub const SETTINGS_HIDDEN: Id = Id::new("settings-hidden");
+/// Settings: Save.
+pub const SETTINGS_SAVE: Id = Id::new("settings-save");
+/// Settings: Cancel.
+pub const SETTINGS_CANCEL: Id = Id::new("settings-cancel");
+
+/// Settings: budget field `i`.
+pub fn settings_budget(i: usize) -> Id {
+    Id::from(format!("settings-budget:{i}"))
+}
+
+/// Settings: revoke consent `i`.
+pub fn settings_revoke(i: usize) -> Id {
+    Id::from(format!("settings-revoke:{i}"))
+}

@@ -156,6 +156,34 @@ impl DiagramState {
         self.fit(fallback_size);
     }
 
+    /// Replaces the citation findings (FR-WAT-05), keeping camera, selection and focus.
+    pub fn replace_citation_issues(&mut self, issues: Vec<archalign_model::Issue>) {
+        let Some(v) = self.view() else {
+            return;
+        };
+        let mut d = v.d.clone();
+        d.warnings.retain(|i| !is_citation_issue(i.code));
+        d.warnings.extend(issues);
+        self.next_version += 1;
+        if let DiagramContent::Loaded(v) = &mut self.content {
+            v.badges = logic::badges(&d.doc, &d.warnings);
+            v.index = CitationIndex::build(&d.doc, &d.warnings);
+            v.version = self.next_version;
+            v.d = d;
+        }
+    }
+
+    /// Shows a re-read version of the open diagram (FR-WAT-06), keeping the camera.
+    pub fn replace_loaded(&mut self, d: DiagramLoaded, fallback_size: Size) {
+        let camera = self.camera;
+        let fitted = self.fitted;
+        self.set_loaded(d, fallback_size);
+        if !fitted {
+            self.camera = camera;
+            self.fitted = false;
+        }
+    }
+
     /// The canvas size, or `fallback` before the canvas reported one.
     pub fn size_or(&self, fallback: Size) -> Size {
         self.canvas_size.unwrap_or(fallback)
@@ -683,4 +711,13 @@ pub enum DiagramMsg {
     ToggleProblems,
     /// The hover delay passed for a node.
     HoverElapsed(usize),
+}
+
+/// Findings produced by the citation checks (FR-VAL-06/07).
+pub fn is_citation_issue(code: archalign_model::IssueCode) -> bool {
+    use archalign_model::IssueCode as C;
+    matches!(
+        code,
+        C::BrokenCitation | C::InvalidCitationPath | C::DeniedCitation | C::ModifiedCitation
+    )
 }

@@ -136,6 +136,194 @@ fn panels_menu<'a>(app: &'a App, p: &'a Palette) -> Element<'a, Message> {
     menu_strip(r.into(), p)
 }
 
+fn history_menu<'a>(app: &'a App, p: &'a Palette) -> Element<'a, Message> {
+    let entries = app
+        .repo
+        .as_ref()
+        .map(|r| r.history.as_slice())
+        .unwrap_or_default();
+    let open = app.diagram.loaded().map(|d| &d.rel);
+    let mut col = column![text("History").size(12).color(p.text_muted)].spacing(2);
+    if entries.is_empty() {
+        col = col.push(
+            text("No diagrams yet: press Archify to create one.")
+                .size(12)
+                .color(p.text_dim),
+        );
+    }
+    for (i, e) in entries.iter().enumerate() {
+        let status = match &e.status {
+            archalign_repo::storage::HistoryStatus::Valid => "valid".to_string(),
+            archalign_repo::storage::HistoryStatus::Invalid { .. } => "invalid".to_string(),
+            archalign_repo::storage::HistoryStatus::Unsupported { diagram_type } => {
+                format!("unsupported type ({diagram_type})")
+            }
+        };
+        let when = e
+            .timestamp
+            .as_deref()
+            .map(format_timestamp)
+            .unwrap_or_else(|| "—".into());
+        let current = open == Some(&e.rel);
+        let label = format!(
+            "{} {}  ·  {}  ·  {}",
+            if current { "●" } else { " " },
+            e.title.as_deref().unwrap_or(&e.folder),
+            when,
+            status
+        );
+        let color = match e.status {
+            archalign_repo::storage::HistoryStatus::Valid => p.text,
+            _ => p.warning(),
+        };
+        col = col.push(
+            container(
+                button(text(label).size(12).font(MONO).color(color))
+                    .on_press(Message::HistoryOpen(i))
+                    .style(button::text)
+                    .width(Length::Fill),
+            )
+            .id(ids::history_entry(i)),
+        );
+    }
+    menu_strip(
+        iced::widget::scrollable(col).height(Length::Shrink).into(),
+        p,
+    )
+}
+
+/// `20261010-101228` → `2026-10-10 10:12:28`.
+pub fn format_timestamp(ts: &str) -> String {
+    let b = ts.as_bytes();
+    if b.len() == 15 && b[8] == b'-' {
+        format!(
+            "{}-{}-{} {}:{}:{}",
+            &ts[0..4],
+            &ts[4..6],
+            &ts[6..8],
+            &ts[9..11],
+            &ts[11..13],
+            &ts[13..15]
+        )
+    } else {
+        ts.to_string()
+    }
+}
+
+fn settings_modal<'a>(app: &'a App, p: &'a Palette) -> Option<Element<'a, Message>> {
+    use crate::app::SettingsMsg as S;
+    let d = app.settings_draft.as_ref()?;
+    let field = |label: &'a str, value: &'a str, id: iced::widget::Id, on: fn(String) -> S| {
+        row![
+            text(label).size(12).color(p.text).width(260),
+            text_input("", value)
+                .id(id)
+                .on_input(move |s| Message::Settings(on(s)))
+                .size(12)
+                .width(Length::Fill),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center)
+    };
+    let mut col = column![
+        text("Settings").size(16).font(MONO_BOLD).color(p.text),
+        field(
+            "Model (provider/model)",
+            &d.model,
+            ids::SETTINGS_MODEL,
+            S::Model
+        ),
+        field(
+            "Reasoning effort (empty = provider default)",
+            &d.reasoning_effort,
+            ids::SETTINGS_EFFORT,
+            S::Effort
+        ),
+    ]
+    .spacing(8)
+    .max_width(640);
+    for (i, label) in crate::settings::BUDGET_FIELDS.iter().enumerate() {
+        col = col.push(
+            row![
+                text(*label).size(12).color(p.text).width(260),
+                text_input("", &d.budgets[i])
+                    .id(ids::settings_budget(i))
+                    .on_input(move |s| Message::Settings(S::Budget(i, s)))
+                    .size(12)
+                    .width(Length::Fill),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center),
+        );
+    }
+    col = col.push(
+        container(
+            button(
+                text(format!(
+                    "{} Show hidden files",
+                    if d.show_hidden_files { "☑" } else { "☐" }
+                ))
+                .size(12),
+            )
+            .on_press(Message::Settings(S::ShowHidden(!d.show_hidden_files)))
+            .style(button::text),
+        )
+        .id(ids::SETTINGS_HIDDEN),
+    );
+    col = col.push(
+        text(format!("API key: {}", app.settings_key_source))
+            .size(12)
+            .font(MONO)
+            .color(p.text_muted),
+    );
+    col = col.push(text("Consents").size(13).font(MONO_BOLD).color(p.text));
+    if app.consents.is_empty() {
+        col = col.push(text("None yet.").size(12).color(p.text_dim));
+    }
+    for (i, c) in app.consents.iter().enumerate() {
+        col = col.push(
+            row![
+                text(format!(
+                    "{} · {} ({}) · {}",
+                    c.repo.display(),
+                    c.provider,
+                    c.model,
+                    c.granted_at
+                ))
+                .size(11)
+                .font(MONO)
+                .color(p.text_muted)
+                .width(Length::Fill),
+                container(
+                    button(text("Revoke").size(11))
+                        .on_press(Message::RevokeConsent(i))
+                        .style(button::secondary)
+                )
+                .id(ids::settings_revoke(i)),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center),
+        );
+    }
+    if let Some(e) = &app.settings_error {
+        col = col.push(text(e.clone()).size(12).color(p.danger()));
+    }
+    col = col.push(
+        row![
+            container(
+                button(text("Cancel").size(12))
+                    .on_press(Message::Settings(S::Cancel))
+                    .style(button::secondary)
+            )
+            .id(ids::SETTINGS_CANCEL),
+            container(button(text("Save").size(12)).on_press(Message::Settings(S::Save)))
+                .id(ids::SETTINGS_SAVE),
+        ]
+        .spacing(10),
+    );
+    Some(modal_layer(col.into(), p, ids::SETTINGS_MODAL))
+}
+
 fn menu_strip<'a>(content: Element<'a, Message>, p: &'a Palette) -> Element<'a, Message> {
     container(content)
         .width(Length::Fill)
@@ -609,6 +797,9 @@ pub fn view(app: &App) -> Element<'_, Message> {
     if app.menu == Some(Menu::Panels) {
         col = col.push(panels_menu(app, p));
     }
+    if app.menu == Some(Menu::History) {
+        col = col.push(history_menu(app, p));
+    }
     if let Some(b) = banners_for(app, None, p) {
         col = col.push(b);
     }
@@ -628,7 +819,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
             ..container::Style::default()
         })
         .into();
-    match consent_modal(app, p) {
+    match consent_modal(app, p).or_else(|| settings_modal(app, p)) {
         Some(m) => iced::widget::stack![base, m].into(),
         None => base,
     }

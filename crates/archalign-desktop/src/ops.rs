@@ -137,6 +137,15 @@ pub fn load_diagram(
     ))
 }
 
+/// The citation findings for `doc` now (FR-WAT-05).
+pub fn citation_issues(
+    sandbox: &Sandbox,
+    doc: &ArchitectureDoc,
+    dirty: &HashSet<String>,
+) -> Vec<Issue> {
+    check_citations(doc, &RepoProbe::new(sandbox), Profile::Import, dirty)
+}
+
 /// Lays out and citation-checks an already-validated document.
 pub fn finish_diagram(
     sandbox: &Sandbox,
@@ -178,19 +187,22 @@ pub fn relayout(
     rel: &RelPath,
     mut doc: ArchitectureDoc,
     dirty: &HashSet<String>,
+    writes: &archalign_repo::SelfWrites,
 ) -> Result<DiagramLoaded, DiagramFailed> {
     archalign_model::strip_geometry(&mut doc);
     let scene = layout_document(&doc, &IcedTextMeasure);
     write_back(&mut doc, &scene);
     let bytes = archalign_model::to_pretty_json(&doc);
-    archalign_repo::storage::atomic_write(sandbox, rel, &bytes).map_err(|e| DiagramFailed {
-        rel: rel.clone(),
-        errors: vec![Issue::error(
-            archalign_model::IssueCode::Json,
-            "",
-            format!("Can't save {rel}: {e}"),
-        )],
-        unsupported: None,
+    archalign_repo::storage::atomic_write_tracked(sandbox, rel, &bytes, writes).map_err(|e| {
+        DiagramFailed {
+            rel: rel.clone(),
+            errors: vec![Issue::error(
+                archalign_model::IssueCode::Json,
+                "",
+                format!("Can't save {rel}: {e}"),
+            )],
+            unsupported: None,
+        }
     })?;
     let loaded = archalign_model::load_architecture(&bytes).map_err(|f| DiagramFailed {
         rel: rel.clone(),

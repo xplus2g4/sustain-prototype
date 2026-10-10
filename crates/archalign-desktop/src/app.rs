@@ -22,13 +22,13 @@ use crate::keys::{self, KeyEnv};
 use crate::ops::{self, DiagramFailed, DiagramLoaded, RepoOpened};
 use crate::palette::ThemeChoice;
 use crate::panes::{PaneKind, PaneLayout};
-use crate::settings::{Consent, Settings};
+use crate::settings::{Consent, Settings, SettingsDraft};
 use crate::source::{
     self, Cite, CiteOutcome, OpenText, PlaceholderReason, SourceContent, SourceState,
 };
 use crate::tree::{self, TreeState};
 use crate::virtual_list;
-use archalign_repo::SelfWrites;
+use archalign_repo::{GitRefreshLimiter, SelfWrites, WatchBatch};
 
 /// Maximum number of recent repositories.
 pub const MAX_RECENTS: usize = 10;
@@ -112,6 +112,23 @@ pub enum Menu {
     Panels,
     /// History ▾
     History,
+}
+
+/// Settings modal messages (FR-STO-06).
+#[derive(Debug, Clone)]
+pub enum SettingsMsg {
+    /// Model field.
+    Model(String),
+    /// `reasoning_effort` field.
+    Effort(String),
+    /// Budget field `i` (see `settings::BUDGET_FIELDS`).
+    Budget(usize, String),
+    /// Show hidden files.
+    ShowHidden(bool),
+    /// Save and close.
+    Save,
+    /// Close without saving.
+    Cancel,
 }
 
 /// Banner severity.
@@ -225,6 +242,14 @@ pub struct Boot {
     pub key_env: Option<KeyEnv>,
     /// LLM client factory (litellm-rust unless overridden, e.g. by tests).
     pub llm: Option<LlmFactory>,
+    /// Where `state.json`/`settings.json` are saved; `None` disables persistence (tests).
+    pub config_dir: Option<PathBuf>,
+    /// The saved pane layout.
+    pub panes: Option<crate::persist::PanesState>,
+    /// The saved window size.
+    pub window: Option<Size>,
+    /// Problems found while loading the saved files, shown as banners at launch.
+    pub startup_notes: Vec<(Level, String)>,
 }
 
 /// Every message the app handles.
@@ -240,6 +265,32 @@ pub enum Message {
     Run(RunMsg),
     /// Revoke a consent (Settings).
     RevokeConsent(usize),
+    /// Settings modal messages.
+    Settings(SettingsMsg),
+    /// The watcher for repo generation `.0` started.
+    WatchStarted(u64),
+    /// The watcher for repo generation `.0` couldn't start or failed.
+    WatchFailed(u64, String),
+    /// A filtered, debounced batch from the watcher (FR-WAT).
+    Watch(u64, WatchBatch),
+    /// The open file was re-read after a change; `None` means it was deleted.
+    FileReloaded(u64, RelPath, Result<Option<Arc<TextLoad>>, String>),
+    /// Citations of the open diagram were re-checked (diagram path, citation issues).
+    CitationsRechecked(u64, RelPath, Vec<archalign_model::Issue>),
+    /// The open diagram was re-read after an external change.
+    DiagramReloaded(u64, Result<Box<DiagramLoaded>, Box<DiagramFailed>>),
+    /// History was rescanned.
+    HistoryScanned(u64, Vec<HistoryEntry>),
+    /// A rate-limited git refresh is due.
+    GitRefreshDue(u64),
+    /// Git metadata was collected.
+    GitCollected(u64, GitStatus),
+    /// Open a History entry.
+    HistoryOpen(usize),
+    /// The state-save delay passed.
+    SaveStateDue,
+    /// A state or settings save finished.
+    Saved(Result<(), String>),
     /// A diagram-pane message.
     Diagram(DiagramMsg),
     /// A shortcut after checking whether a text field has focus.
@@ -351,6 +402,26 @@ pub struct App {
     pub run_drawer_open: bool,
     /// The app's own writes, for the watcher (FR-WAT-08).
     pub self_writes: SelfWrites,
+    /// Where state and settings are saved (`None`: not persisted).
+    pub config_dir: Option<PathBuf>,
+    /// The last repository opened (kept while none is open).
+    pub last_repo: Option<PathBuf>,
+    /// The state last written (or being written).
+    saved_state: Option<crate::persist::AppState>,
+    /// When the state was last written.
+    last_state_save: Option<std::time::Instant>,
+    /// A delayed save is scheduled.
+    save_scheduled: bool,
+    /// Banners from launch, kept when a repo opens.
+    startup_banners: Vec<u64>,
+    /// The Settings modal, when open.
+    pub settings_draft: Option<SettingsDraft>,
+    /// FR-WAT-09 rate limit.
+    git_limiter: GitRefreshLimiter,
+    /// The last Settings validation error.
+    pub settings_error: Option<String>,
+    /// Where the API key for the current model comes from (computed when Settings opens).
+    pub settings_key_source: String,
     /// Watcher state.
     pub watch: WatchStatus,
     /// The git executable.
@@ -371,8 +442,12 @@ impl App {
             .collect();
         let app = Self {
             theme: boot.theme,
-            panes: PaneLayout::default(),
-            window: DEFAULT_WINDOW,
+            panes: boot
+                .panes
+                .as_ref()
+                .map(crate::persist::PanesState::restore)
+                .unwrap_or_default(),
+            window: boot.window.unwrap_or(DEFAULT_WINDOW),
             repo: None,
             generation: 0,
             recents,
@@ -398,6 +473,16 @@ impl App {
             run_log: Vec::new(),
             run_drawer_open: false,
             self_writes: SelfWrites::default(),
+            config_dir: boot.config_dir.clone(),
+            last_repo: boot.last_repo.clone(),
+            saved_state: None,
+            last_state_save: None,
+            save_scheduled: false,
+            startup_banners: Vec::new(),
+            settings_draft: None,
+            git_limiter: GitRefreshLimiter::default(),
+            settings_error: None,
+            settings_key_source: String::new(),
             watch: WatchStatus::ManualOnly,
             git_program: boot.git_program.clone().unwrap_or_else(|| "git".into()),
         };
@@ -409,6 +494,15 @@ impl App {
             }),
             |_| Message::Warmed,
         );
+        let mut app = app;
+        for (level, text) in &boot.startup_notes {
+            app.banner(None, *level, text.clone());
+            app.startup_banners.push(app.next_banner - 1);
+        }
+        // What's on disk now, so the first save happens only after a change.
+        if boot.startup_notes.is_empty() {
+            app.saved_state = Some(app.app_state());
+        }
         let reopen = match boot.last_repo {
             Some(p) if p.is_dir() => Task::done(Message::OpenRepo(p)),
             _ => Task::none(),
@@ -520,6 +614,14 @@ impl App {
 
     /// The `update` function.
     pub fn update(&mut self, message: Message) -> Task<Message> {
+        let task = self.handle(message);
+        match self.persist_state() {
+            Some(save) => Task::batch([task, save]),
+            None => task,
+        }
+    }
+
+    fn handle(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Action(action) => self.perform(action),
             Message::KeyPressed(key, modifiers, captured) => {
@@ -702,6 +804,140 @@ impl App {
                 }
                 Task::none()
             }
+            Message::Settings(msg) => self.settings_msg(msg),
+            Message::WatchStarted(g) => {
+                if g == self.generation {
+                    self.watch = WatchStatus::Watching;
+                }
+                Task::none()
+            }
+            Message::WatchFailed(g, e) => {
+                if g == self.generation {
+                    tracing::warn!(error = %e, "file watcher unavailable");
+                    self.watch = WatchStatus::ManualOnly;
+                }
+                Task::none()
+            }
+            Message::Watch(g, batch) => {
+                if g != self.generation {
+                    return Task::none();
+                }
+                self.watch_batch(batch)
+            }
+            Message::FileReloaded(g, rel, result) => {
+                if g != self.generation || self.source.rel() != Some(&rel) {
+                    return Task::none();
+                }
+                match result {
+                    Ok(Some(load)) => self.file_reloaded(rel, load),
+                    Ok(None) => {
+                        self.banner(
+                            Some(PaneKind::Source),
+                            Level::Warning,
+                            format!("File deleted: {rel}"),
+                        );
+                        Task::none()
+                    }
+                    Err(e) => {
+                        self.banner(
+                            Some(PaneKind::Source),
+                            Level::Error,
+                            format!("Can't read {rel}: {e}"),
+                        );
+                        Task::none()
+                    }
+                }
+            }
+            Message::CitationsRechecked(g, rel, issues) => {
+                if g != self.generation || self.diagram.loaded().map(|d| &d.rel) != Some(&rel) {
+                    return Task::none();
+                }
+                self.diagram.replace_citation_issues(issues);
+                self.sync_tree_markers();
+                Task::none()
+            }
+            Message::DiagramReloaded(g, result) => {
+                if g != self.generation {
+                    return Task::none();
+                }
+                match result {
+                    Ok(d) => {
+                        let fallback = self.canvas_estimate();
+                        self.diagram.replace_loaded(*d, fallback);
+                        self.sync_tree_markers();
+                    }
+                    Err(f) => {
+                        // FR-WAT-06: keep the last good version.
+                        let first = f
+                            .errors
+                            .first()
+                            .map(|i| i.message.clone())
+                            .unwrap_or_default();
+                        self.banner(
+                            Some(PaneKind::Diagram),
+                            Level::Warning,
+                            format!("{} changed on disk and is now invalid ({first}); showing the last good version", f.rel),
+                        );
+                    }
+                }
+                Task::none()
+            }
+            Message::HistoryScanned(g, entries) => {
+                if g == self.generation
+                    && let Some(repo) = &mut self.repo
+                {
+                    repo.history = entries;
+                }
+                Task::none()
+            }
+            Message::GitRefreshDue(g) => {
+                if g != self.generation {
+                    return Task::none();
+                }
+                self.git_refresh_now()
+            }
+            Message::GitCollected(g, status) => {
+                if g != self.generation {
+                    return Task::none();
+                }
+                self.git_limiter.done(std::time::Instant::now());
+                let changed = match &mut self.repo {
+                    Some(repo) if repo.git != status => {
+                        repo.git = status;
+                        true
+                    }
+                    _ => false,
+                };
+                // Dirty paths drive the "modified" badges (FR-DIA-09).
+                if changed {
+                    self.recheck_citations()
+                } else {
+                    Task::none()
+                }
+            }
+            Message::HistoryOpen(i) => {
+                let rel = self
+                    .repo
+                    .as_ref()
+                    .and_then(|r| r.history.get(i))
+                    .map(|e| e.rel.clone());
+                self.menu = None;
+                match rel {
+                    Some(rel) => self.open_diagram(rel),
+                    None => Task::none(),
+                }
+            }
+            Message::SaveStateDue => {
+                self.save_scheduled = false;
+                self.persist_state().unwrap_or_else(Task::none)
+            }
+            Message::Saved(result) => {
+                if let Err(e) = result {
+                    tracing::warn!(error = %e, "saving app state failed");
+                    self.banner(None, Level::Warning, format!("Can't save app state: {e}"));
+                }
+                Task::none()
+            }
             Message::Diagram(msg) => self.diagram_msg(msg),
             Message::DismissBanner(id) => {
                 self.banners.retain(|b| b.id != id);
@@ -767,8 +1003,22 @@ impl App {
             Action::Relayout => self.relayout(),
             Action::Archify => self.archify(),
             Action::CancelRun => self.cancel_run(),
-            // Wired in M6: Settings and Refresh.
-            Action::Settings | Action::Refresh => Task::none(),
+            Action::Settings => {
+                self.menu = None;
+                self.settings_error = None;
+                self.settings_draft = Some(SettingsDraft::of(&self.settings));
+                self.settings_key_source =
+                    match archalign_agent::litellm::provider_of(&self.settings.model) {
+                        Some(p) => {
+                            // Only the source is kept; the key itself is dropped here (FR-STO-06).
+                            let (source, _) = keys::resolve(&self.key_env, p.key_env);
+                            format!("{} — {source}", p.key_env)
+                        }
+                        None => "unknown provider".into(),
+                    };
+                Task::none()
+            }
+            Action::Refresh => self.refresh_all(),
         }
     }
 
@@ -801,9 +1051,11 @@ impl App {
         self.tree = TreeState::default();
         self.source = SourceState::default();
         self.diagram = DiagramState::default();
-        self.banners.clear();
+        let keep = self.startup_banners.clone();
+        self.banners.retain(|b| keep.contains(&b.id));
         self.status_message = None;
         self.menu = None;
+        self.last_repo = Some(opened.root.clone());
         // Recents: most recent first, unique, capped.
         self.recents.retain(|r| r.path != opened.root);
         self.recents.insert(
@@ -1310,13 +1562,332 @@ impl App {
         let doc = (*d.doc).clone();
         let generation = self.generation;
         let rel2 = rel.clone();
+        let writes = self.self_writes.clone();
         Task::perform(
-            ops::blocking(move || ops::relayout(&sandbox, &rel, doc, &dirty)),
+            ops::blocking(move || ops::relayout(&sandbox, &rel, doc, &dirty, &writes)),
             move |r| {
                 let r = r.unwrap_or_else(|| Err(ops::interrupted_failure(rel2.clone())));
                 Message::DiagramLoaded(generation, r.map(Box::new).map_err(Box::new))
             },
         )
+    }
+
+    /// The persisted part of the app state.
+    pub fn app_state(&self) -> crate::persist::AppState {
+        crate::persist::AppState {
+            version: 1,
+            window: crate::persist::WindowSize {
+                width: self.window.width,
+                height: self.window.height,
+            },
+            panes: Some(crate::persist::PanesState::capture(&self.panes)),
+            theme: self.theme,
+            last_repo: self.last_repo.clone(),
+            recent_repos: self.recents.iter().map(|r| r.path.clone()).collect(),
+            consents: self.consents.clone(),
+        }
+    }
+
+    /// Saves `state.json` when the state changed, at most once per second (FR-PANE-08,
+    /// FR-STO-05). Returns the save (or the delayed retry) task.
+    fn persist_state(&mut self) -> Option<Task<Message>> {
+        let dir = self.config_dir.clone()?;
+        if self.save_scheduled {
+            return None;
+        }
+        let state = self.app_state();
+        if self.saved_state.as_ref() == Some(&state) {
+            return None;
+        }
+        let now = std::time::Instant::now();
+        if let Some(last) = self.last_state_save {
+            let since = now.duration_since(last);
+            if since < crate::persist::SAVE_INTERVAL {
+                self.save_scheduled = true;
+                let wait = crate::persist::SAVE_INTERVAL - since;
+                return Some(Task::perform(
+                    async move { tokio::time::sleep(wait).await },
+                    |_| Message::SaveStateDue,
+                ));
+            }
+        }
+        self.last_state_save = Some(now);
+        self.saved_state = Some(state.clone());
+        Some(Task::perform(
+            ops::blocking(move || crate::persist::save_state(&dir, &state)),
+            saved,
+        ))
+    }
+
+    fn settings_msg(&mut self, msg: SettingsMsg) -> Task<Message> {
+        let Some(draft) = self.settings_draft.as_mut() else {
+            return Task::none();
+        };
+        match msg {
+            SettingsMsg::Model(s) => draft.model = s,
+            SettingsMsg::Effort(s) => draft.reasoning_effort = s,
+            SettingsMsg::Budget(i, s) => {
+                if let Some(f) = draft.budgets.get_mut(i) {
+                    *f = s;
+                }
+            }
+            SettingsMsg::ShowHidden(b) => draft.show_hidden_files = b,
+            SettingsMsg::Cancel => {
+                self.settings_draft = None;
+                self.settings_error = None;
+            }
+            SettingsMsg::Save => {
+                let next = match draft.apply(&self.settings) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        self.settings_error = Some(e);
+                        return Task::none();
+                    }
+                };
+                self.settings_draft = None;
+                self.settings_error = None;
+                let hidden_changed = next.show_hidden_files != self.settings.show_hidden_files;
+                self.settings = next.clone();
+                let save = match self.config_dir.clone() {
+                    Some(dir) => Task::perform(
+                        ops::blocking(move || crate::persist::save_settings(&dir, &next)),
+                        saved,
+                    ),
+                    None => Task::none(),
+                };
+                let relist = if hidden_changed {
+                    self.refresh_tree()
+                } else {
+                    Task::none()
+                };
+                return Task::batch([save, relist]);
+            }
+        }
+        Task::none()
+    }
+
+    /// Re-lists the root and every expanded folder, keeping expansion and selection.
+    pub fn refresh_tree(&mut self) -> Task<Message> {
+        if self.repo.is_none() {
+            return Task::none();
+        }
+        let mut dirs = vec![RelPath::root()];
+        let mut expanded: Vec<_> = self.tree.expanded.iter().cloned().collect();
+        expanded.sort();
+        dirs.extend(expanded);
+        let tasks: Vec<_> = dirs.into_iter().map(|dir| self.list(dir)).collect();
+        Task::batch(tasks)
+    }
+
+    /// Handles one watcher batch (FR-WAT-03..09).
+    fn watch_batch(&mut self, batch: WatchBatch) -> Task<Message> {
+        let changes = match batch {
+            WatchBatch::Full => return self.refresh_all(),
+            WatchBatch::Error(e) => {
+                tracing::warn!(error = %e, "file watcher error");
+                return Task::none();
+            }
+            WatchBatch::Changes(c) => c,
+        };
+        let mut tasks = Vec::new();
+        // FR-WAT-03: re-list only affected folders that are listed and expanded (or the root).
+        for dir in &changes.dirs {
+            if dir.is_root()
+                || (self.tree.expanded.contains(dir) && self.tree.children.contains_key(dir))
+            {
+                tasks.push(self.list(dir.clone()));
+            }
+        }
+        // FR-WAT-04: the open file.
+        if let Some(rel) = self.source.rel().cloned()
+            && changes.paths.contains(&rel)
+        {
+            tasks.push(self.reload_file(rel));
+        }
+        // FR-WAT-06: History, and the open candidate.json.
+        if changes.archify {
+            tasks.push(self.rescan_history());
+        }
+        let open_diagram = self.diagram.loaded().map(|d| d.rel.clone());
+        if let Some(rel) = &open_diagram
+            && changes.paths.contains(rel)
+            && !self.self_writes_own(rel)
+        {
+            tasks.push(self.reload_diagram(rel.clone()));
+        } else if let Some(d) = self.diagram.loaded()
+            && changes.paths.iter().any(|p| {
+                d.doc
+                    .components
+                    .iter()
+                    .any(|c| c.sources().iter().any(|s| cites(&s.path, p)))
+            })
+        {
+            // FR-WAT-05: re-check citations of changed paths.
+            tasks.push(self.recheck_citations());
+        }
+        // FR-WAT-09: git metadata, rate-limited.
+        if changes.git {
+            tasks.push(self.request_git_refresh());
+        }
+        Task::batch(tasks)
+    }
+
+    fn self_writes_own(&self, rel: &RelPath) -> bool {
+        self.repo
+            .as_ref()
+            .and_then(|r| r.sandbox.resolve(rel).ok())
+            .is_some_and(|abs| self.self_writes.is_own(&abs))
+    }
+
+    /// FR-WAT-10: ⌘R refreshes the tree, the open file, citations, History and git metadata.
+    pub fn refresh_all(&mut self) -> Task<Message> {
+        if self.repo.is_none() {
+            return Task::none();
+        }
+        let mut tasks = vec![
+            self.refresh_tree(),
+            self.rescan_history(),
+            self.git_refresh_now(),
+        ];
+        if let Some(rel) = self.source.rel().cloned() {
+            tasks.push(self.reload_file(rel));
+        }
+        tasks.push(self.recheck_citations());
+        self.status_message = Some("Refreshed".into());
+        Task::batch(tasks)
+    }
+
+    fn reload_file(&mut self, rel: RelPath) -> Task<Message> {
+        let Some(sandbox) = self.repo.as_ref().map(|r| r.sandbox.clone()) else {
+            return Task::none();
+        };
+        let generation = self.generation;
+        Task::perform(
+            ops::blocking({
+                let rel = rel.clone();
+                move || match sandbox.resolve(&rel) {
+                    Ok(abs) if abs.exists() => {
+                        ops::read_file(&sandbox, &rel).map(|l| Some(Arc::new(l)))
+                    }
+                    Ok(_) => Ok(None),
+                    Err(_) if !sandbox.root().join(rel.as_str()).exists() => Ok(None),
+                    Err(e) => Err(e.to_string()),
+                }
+            }),
+            move |r| {
+                Message::FileReloaded(
+                    generation,
+                    rel.clone(),
+                    r.unwrap_or_else(|| Err("reading was interrupted".to_string())),
+                )
+            },
+        )
+    }
+
+    /// Installs a re-read file, keeping the scroll position and the band (FR-WAT-04).
+    fn file_reloaded(&mut self, rel: RelPath, load: Arc<TextLoad>) -> Task<Message> {
+        let band = self.source.band;
+        let offset = self.source.scroll.offset_y;
+        self.clear_pane_banners(PaneKind::Source);
+        let _ = self.file_loaded(rel, None, Ok(load));
+        if let Some(n) = self.source.line_count() {
+            self.source.band = band.filter(|(a, _)| *a <= n).map(|(a, b)| (a, b.min(n)));
+        }
+        self.source.scroll.offset_y = offset;
+        let h = self.pane_body_height(PaneKind::Source);
+        self.source.ensure_highlighted(h);
+        operation::scroll_to(
+            ids::SOURCE_SCROLL,
+            scrollable::AbsoluteOffset { x: 0.0, y: offset },
+        )
+    }
+
+    fn rescan_history(&mut self) -> Task<Message> {
+        let Some(sandbox) = self.repo.as_ref().map(|r| r.sandbox.clone()) else {
+            return Task::none();
+        };
+        let generation = self.generation;
+        Task::perform(
+            ops::blocking(move || archalign_repo::storage::scan_history(&sandbox)),
+            move |r| Message::HistoryScanned(generation, r.unwrap_or_default()),
+        )
+    }
+
+    fn reload_diagram(&mut self, rel: RelPath) -> Task<Message> {
+        let Some((sandbox, dirty)) = self.repo.as_ref().map(|r| (r.sandbox.clone(), r.dirty()))
+        else {
+            return Task::none();
+        };
+        let generation = self.generation;
+        Task::perform(
+            ops::blocking({
+                let rel = rel.clone();
+                move || ops::load_diagram(&sandbox, &rel, &dirty)
+            }),
+            move |r| match r {
+                Some(r) => Message::DiagramReloaded(generation, r.map(Box::new).map_err(Box::new)),
+                None => Message::DiagramReloaded(
+                    generation,
+                    Err(Box::new(DiagramFailed {
+                        rel: rel.clone(),
+                        errors: vec![],
+                        unsupported: None,
+                    })),
+                ),
+            },
+        )
+    }
+
+    fn recheck_citations(&mut self) -> Task<Message> {
+        let Some((sandbox, dirty)) = self.repo.as_ref().map(|r| (r.sandbox.clone(), r.dirty()))
+        else {
+            return Task::none();
+        };
+        let Some(d) = self.diagram.loaded() else {
+            return Task::none();
+        };
+        let doc = d.doc.clone();
+        let rel = d.rel.clone();
+        let generation = self.generation;
+        Task::perform(
+            ops::blocking(move || ops::citation_issues(&sandbox, &doc, &dirty)),
+            move |r| Message::CitationsRechecked(generation, rel.clone(), r.unwrap_or_default()),
+        )
+    }
+
+    fn request_git_refresh(&mut self) -> Task<Message> {
+        match self.git_limiter.request(std::time::Instant::now()) {
+            Some(d) if d.is_zero() => self.git_refresh_now(),
+            Some(d) => {
+                let generation = self.generation;
+                Task::perform(async move { tokio::time::sleep(d).await }, move |_| {
+                    Message::GitRefreshDue(generation)
+                })
+            }
+            None => Task::none(),
+        }
+    }
+
+    fn git_refresh_now(&mut self) -> Task<Message> {
+        let Some(root) = self.repo.as_ref().map(|r| r.root.clone()) else {
+            return Task::none();
+        };
+        let program = self.git_program.clone();
+        let generation = self.generation;
+        Task::perform(
+            ops::blocking(move || archalign_repo::git::collect_with(&program, &root)),
+            move |r| Message::GitCollected(generation, r.unwrap_or(GitStatus::Unavailable)),
+        )
+    }
+
+    fn sync_tree_markers(&mut self) {
+        if let Some(v) = self.diagram.view() {
+            self.tree.markers = tree::Markers {
+                cited: v.index.by_file.keys().cloned().collect(),
+                folder_counts: v.index.folder_counts.clone().into_iter().collect(),
+                broken: v.index.broken_files.iter().cloned().collect(),
+            };
+        }
     }
 
     /// FR-GEN-01: checks the preconditions, asks for consent, creates the diagram folder and
@@ -1584,6 +2155,15 @@ impl App {
             } else {
                 Subscription::none()
             },
+            match &self.repo {
+                Some(r) => crate::watch::subscription(crate::watch::WatchKey {
+                    generation: self.generation,
+                    sandbox: r.sandbox.clone(),
+                    writes: self.self_writes.clone(),
+                    show_hidden: self.settings.show_hidden_files,
+                }),
+                None => Subscription::none(),
+            },
         ])
     }
 
@@ -1614,4 +2194,15 @@ fn apply_cite_with_banner(
             None
         }
     }
+}
+
+fn saved(r: Option<Result<(), String>>) -> Message {
+    Message::Saved(r.unwrap_or_else(|| Err("the save was interrupted".to_string())))
+}
+
+/// Whether a citation of `cited` is affected by a change at `changed` (the file itself or
+/// a folder above it).
+fn cites(cited: &str, changed: &RelPath) -> bool {
+    let c = changed.as_str();
+    cited == c || (cited.starts_with(c) && cited.as_bytes().get(c.len()) == Some(&b'/'))
 }

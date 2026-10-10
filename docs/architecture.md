@@ -155,10 +155,10 @@ The type names below are the intended public surface. The implementer may refine
 - Run folders: `slugify(focus, repo name)` (at most 40 chars on a word boundary), `now_run_timestamp` (`jiff` local time, `YYYYMMDD-HHMMSS`), `create_run_folder` (creates `.archify/`, numbered suffix on collision) and `append_line` for `run.jsonl` (FR-STO-01/02).
 - `SelfWrites` records (path, len, mtime) of the app's own writes (`atomic_write_tracked`) so the watcher can ignore them (FR-WAT-08, wired in M6).
 
-**`watch`.** `RepoWatcher` wraps `notify-debouncer-mini` (300 ms).
-- Filters events with the ignore rules, always keeping `.archify/` and keeping only `.git/HEAD` and `.git/index` under `.git/`.
-- Collapses batches of more than 500 paths into a full refresh.
-- Sends `WatchBatch` values over a channel ([0017](adr/0017-file-watching.md)).
+**`watch`.** `RepoWatcher::start(sandbox, self_writes, show_hidden, on_batch)` wraps `notify-debouncer-mini` (300 ms, FSEvents, recursive on the canonical root); dropping it stops the watch ([0017](adr/0017-file-watching.md)).
+- `classify` is the pure filter: drops paths outside the root; under `.git/` keeps only `HEAD`/`index` (as a `git` flag); always keeps `.archify/`; drops ignored paths (the tree's rules and `show_hidden`) and the app's own writes (`SelfWrites`). More than 500 remaining paths become `WatchBatch::Full`.
+- `Changes` carries the sorted paths, their parent folders, and `archify`/`git` flags.
+- `GitRefreshLimiter` spaces git refreshes at least 2 s apart and coalesces requests in between (FR-WAT-09).
 
 ### 3.4 archalign-agent
 
@@ -206,7 +206,7 @@ The crate is a library (`src/lib.rs`, so tests can drive `App`) plus the `archal
 - **State:** `RepoSession` (`Sandbox`, `GitStatus`, history), `PaneLayout`, `TreeState`, `SourceState`, `DiagramState`, `RunState`, recents, Focus text, banners, theme, a `generation` counter (async results from a previous repo are dropped), and the git program (overridable for tests).
 - **`Message`:** one enum. User actions are `Message::Action(Action)`; toolbar buttons and shortcuts send the same `Action` (FR-PANE-09).
 - **Shortcuts:** `keyboard::listen()` delivers key presses no widget captured. `shortcut_action` maps them to an `Action`, disabled actions are dropped, and an `is_focused` check over the visible text fields runs before dispatch, so global shortcuts don't fire while typing (§9).
-- **`Boot`:** last repo, recents, theme, `Settings`, consents, and test overrides for the git program, the key environment (`KeyEnv`) and the LLM factory (filled from `state.json`/`settings.json` in M6).
+- **`Boot`:** last repo, recents, theme, `Settings`, consents, and test overrides for the git program, the key environment (`KeyEnv`) and the LLM factory (filled by `persist::boot_from_disk`).
 - **Archify** (`App::archify`, FR-GEN-01): provider from the model prefix → key (`keys::resolve`) → consent (else the consent modal) → client from the `LlmFactory` → `create_run_folder` → `Task::run(agent_run::stream(prepared)).abortable()`. Each failure is a banner and no model call. `RunMsg` events update `RunState` and the run-log drawer; a 1 s `time::every` tick updates the elapsed time; Cancel/⌘. aborts the handle; success rescans History and opens the candidate.
 - All file-system work runs in `Task::perform` + `spawn_blocking` (`ops`: `open_repo`, `list`, `read_file`, `load_diagram`); results come back as messages.
 
@@ -234,9 +234,13 @@ The crate is a library (`src/lib.rs`, so tests can drive `App`) plus the `archal
 - `agent_run`: `LlmSpec`/`LlmFactory` (`provider_factory` in production), `PreparedRun`, the `stream()` that runs `run_agent` on the tokio runtime and forwards events as `RunMsg`, `DesktopFinalize` (layout, `write_back` of integer `pos`/`size`, `atomic_write_tracked` of `candidate.json`), `event_line` for the drawer, and `repo_facts`;
 - `view`: the consent modal (`modal_layer`: an `opaque` backdrop in a `stack`) and the run-log drawer at the bottom of the Diagram pane.
 
-**Planned (M6):** `persist` (`state.json`, `settings.json`, a serde mirror of the pane layout because `pane_grid::Configuration` has no serde support ([0006](adr/0006-three-pane-grid-layout.md))); the Settings modal; the watcher subscription.
+**M6 modules:**
+- `persist`: `state.json`/`settings.json` in `directories::ProjectDirs` (`ArchAlign`), written atomically through `storage::atomic_write`; `LayoutNode`/`PanesState`, a serde mirror of the pane grid because `pane_grid::Configuration` has no serde support ([0006](adr/0006-three-pane-grid-layout.md)); lenient loading (an invalid layout falls back alone; a bad file falls back to defaults with a banner); `boot_from_disk` builds the launch `Boot`. `App::update` compares `app_state()` with the last saved state after every message and saves at most once per second.
+- `watch`: the watcher `Subscription::run_with(WatchKey, stream)`, keyed by repo generation, root and "show hidden files". The stream starts a `RepoWatcher` and sends `WatchStarted`/`WatchFailed`, then one `Watch` message per batch.
+- `view`: the History strip (title, timestamp, status; click opens) and the Settings modal (model, `reasoning_effort`, budgets, show hidden files, key source, consents with Revoke).
+- Watch handling in `App`: re-list affected expanded folders, reload the open file keeping scroll and band ("File deleted" banner), re-check citations (`ops::citation_issues` → `DiagramState::replace_citation_issues`, keeping camera and selection), rescan History, reload an externally changed open diagram (keeping the last good one if invalid), and rate-limited git refreshes; `Full` and ⌘R run all of them (`refresh_all`).
 
-**Subscriptions:** keyboard shortcuts, window resizes and the 1 s run tick now; window close (for persistence) and `Subscription::run_with(repo_root, watch_stream)` for watcher batches later.
+**Subscriptions:** keyboard shortcuts, window resizes, the 1 s run tick, and the repo watcher.
 
 **Tests.** `tests/common/` holds the UI harness ([0032](adr/0032-ui-test-harness-on-iced-test-parts.md)): `iced_test`'s headless renderer and a persisted `UserInterface`, with the app's real tasks executed. Streams that stall (an agent run waiting on the model) stay pending and are pumped by `pump`/`wait_until`, so long-running tasks and Cancel can be tested. Tests never read the real environment or `.env` and never reach the network unless a test injects a key environment and an LLM factory. `tests/live.rs` is the opt-in live run (`ARCHALIGN_LIVE=1`, `#[ignore]`). Screenshots go to `target/smoke/`.
 

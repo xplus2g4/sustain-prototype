@@ -7,5 +7,5 @@ fn main() -> iced::Result {
         .with_writer(std::io::stderr)
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
-    archalign_desktop::run(archalign_desktop::app::Boot::default())
+    archalign_desktop::run(archalign_desktop::persist::boot_from_disk())
 }

@@ -75,8 +75,11 @@ impl Harness {
                 None,
             ))
             .expect("headless renderer");
+        let restored_window = boot.window.is_some();
         let (mut app, boot_task) = App::new(boot);
-        app.window = WINDOW;
+        if !restored_window {
+            app.window = WINDOW;
+        }
         let mut h = Self {
             app,
             renderer,
@@ -390,6 +393,22 @@ impl Harness {
     }
 
     /// Renders the current UI and writes it as a PNG.
+    /// Feeds file-system changes to the app as the watcher would: the raw paths go
+    /// through the real filter (`archalign_repo::classify`) and arrive as a `Watch` message.
+    pub fn watch(&mut self, abs_paths: &[std::path::PathBuf]) {
+        let repo = self.app.repo.as_ref().expect("a repo is open");
+        let batch = archalign_repo::classify(
+            &repo.sandbox,
+            abs_paths,
+            &self.app.self_writes,
+            self.app.settings.show_hidden_files,
+        );
+        if let Some(batch) = batch {
+            let g = self.app.generation;
+            self.send(Message::Watch(g, batch));
+        }
+    }
+
     pub fn screenshot(&mut self, path: &Path) {
         let theme = self.app.iced_theme();
         let cursor = self.cursor;

@@ -140,22 +140,22 @@ How to use this file ([spec §11–§13](spec.md#11-milestones), [0030](adr/0030
 
 ## M6 History, settings, state, watcher
 
-- [ ] FR-STO-04 History
-- [ ] FR-STO-05 App state and settings
-- [ ] FR-STO-06 Settings modal
-- [ ] FR-PANE-08 Layout persistence
-- [ ] FR-DIA-10 Theme
-- [ ] FR-GEN-13 Model settings
-- [ ] FR-WAT-01 Lifecycle
-- [ ] FR-WAT-02 Debounce and filtering
-- [ ] FR-WAT-03 Tree
-- [ ] FR-WAT-04 Open file
-- [ ] FR-WAT-05 Citations
-- [ ] FR-WAT-06 Diagram files
-- [ ] FR-WAT-07 Bursts
-- [ ] FR-WAT-08 Self-writes
-- [ ] FR-WAT-09 Git refresh
-- [ ] FR-WAT-10 Fallback
+- [x] FR-STO-04 History. Evidence: `repo/tests/storage.rs::{history_is_newest_first_and_hides_folders_without_candidate, history_ignores_gitignore_and_skips_escaping_links}` `[unit]`; `desktop/tests/state.rs::history_lists_newest_first_with_title_time_and_status_and_opens_entries` `[sim]`. Screenshot reviewed: `target/smoke/m6/history.png`.
+- [x] FR-STO-05 App state and settings. Evidence: `desktop/src/persist.rs` tests (`state_round_trips_with_a_customized_layout`, `the_saved_json_has_the_documented_shape`, `missing_unreadable_and_invalid_files_fall_back_with_a_problem`, `settings_round_trip_and_missing_fields_take_defaults`, `recents_are_capped_and_tiny_windows_are_ignored`); `desktop/tests/state.rs::{state_survives_a_restart_layout_theme_window_recents_and_consents, an_invalid_state_file_falls_back_with_a_banner}`. A missing file (first launch) shows an Info banner and `settings.json` is created; an unreadable or invalid one shows a Warning and isn't overwritten until the next save.
+- [x] FR-STO-06 Settings modal. Evidence: `desktop/tests/state.rs::{settings_edits_persist_never_show_the_key_and_apply_to_the_next_run, show_hidden_files_from_settings_relists_the_tree}` (key source shown as "OPENAI_API_KEY — environment", the key text is never rendered, consents listed with Revoke). Screenshot reviewed: `target/smoke/m6/settings.png`.
+- [x] FR-PANE-08 Layout persistence. Evidence: `persist.rs::{state_round_trips_with_a_customized_layout, an_invalid_layout_falls_back_to_the_default_layout_only}` (the invalid case logs `tracing::warn!`); `state.rs::{state_survives_a_restart_layout_theme_window_recents_and_consents, state_saves_are_rate_limited_to_once_per_second}`.
+- [x] FR-DIA-10 Theme. Evidence: `state.rs::state_survives_a_restart_layout_theme_window_recents_and_consents` (toggle → restart → light).
+- [x] FR-GEN-13 Model settings. Evidence: `settings.rs::draft_tests::a_draft_round_trips_and_validates`; `state.rs::settings_edits_persist_never_show_the_key_and_apply_to_the_next_run` (the next run uses the new model, `reasoning_effort` "high" and 7 max turns).
+- [x] FR-WAT-01 Lifecycle. Evidence: `repo/tests/watch.rs::real_watcher_reports_changes_and_stops_on_drop`; `desktop/tests/watching.rs::the_subscription_stream_starts_a_watcher_and_delivers_batches`. The subscription is keyed by repo generation, so iced drops the stream, and with it the watcher, when the repo closes or changes.
+- [x] FR-WAT-02 Debounce and filtering. Evidence: `repo/tests/watch.rs::{outside_paths_are_dropped, git_dir_keeps_only_head_and_index_as_git_flag, archify_is_kept_even_when_gitignored_and_hidden, gitignored_paths_are_dropped, hidden_paths_follow_show_hidden, deleted_paths_are_kept_unless_ignored, non_canonical_aliases_of_the_root_are_accepted}`; `DEBOUNCE` = 300 ms.
+- [x] FR-WAT-03 Tree. Evidence: `watching.rs::tree_relists_only_affected_expanded_folders_and_keeps_state`.
+- [x] FR-WAT-04 Open file. Evidence: `watching.rs::the_open_file_reloads_keeping_scroll_and_band_and_reports_deletion`. Screenshot reviewed: `target/smoke/m6/reloaded.png`.
+- [x] FR-WAT-05 Citations. Evidence: `watching.rs::citations_of_changed_files_are_rechecked` (badge and tree marker update; camera and selection kept).
+- [x] FR-WAT-06 Diagram files. Evidence: `watching.rs::diagram_files_refresh_history_and_reload_the_open_diagram`.
+- [x] FR-WAT-07 Bursts. Evidence: `repo/tests/watch.rs::burst_above_threshold_is_full_refresh` (500 → changes, 501 → full); `watching.rs::a_burst_triggers_one_full_refresh`.
+- [x] FR-WAT-08 Self-writes. Evidence: `repo/tests/watch.rs::self_writes_are_dropped_but_later_external_changes_are_kept`; `repo/tests/run_storage.rs::{atomic_write_tracked_writes_and_records, self_writes_reject_later_external_changes}`; `watching.rs::the_apps_own_relayout_write_is_not_reloaded`. Run results and Re-layout both write through `atomic_write_tracked`.
+- [x] FR-WAT-09 Git refresh. Evidence: `repo/tests/watch.rs::git_refresh_limiter_spaces_and_coalesces`; `watching.rs::git_refreshes_are_rate_limited_to_one_per_two_seconds` (real git; the first change refreshes at once and updates the "modified" badge; later ones coalesce into one refresh after 2 s).
+- [x] FR-WAT-10 Fallback. Evidence: `watching.rs::cmd_r_refreshes_everything_without_a_watcher` (status bar "Manual refresh only" until the watcher starts; ⌘R re-lists the tree, reloads the open file, re-checks citations, rescans History and refreshes git).
 
 ## M7 Finish
 
@@ -207,4 +207,11 @@ How to use this file ([spec §11–§13](spec.md#11-milestones), [0030](adr/0030
   - Live run 1 failed: gpt-6 models reject function tools on `/v1/chat/completions` unless `reasoning_effort` is `none`. The owner chose a Responses API adapter for `openai/` (ADR 0034). litellm-rust drops response headers, so `Retry-After` comes from error bodies for the other providers (ADR 0033).
   - Harness: pending task streams are parked and pumped (`pump`, `wait_until`), so long runs and Cancel can be simulated. It never reads the real environment or `.env`, and never reaches the network.
   - Finding for M7: both live candidates fail Archify's `composition/desktop-readability` check (viewBox 2903 px wide for HyperTrack; projected 8 px edge text at 3.7 px). The schema and render stages pass. In the app, the fitted HyperTrack diagram is too small for labels in the default pane width.
+  - Gates: fmt, clippy `-D warnings`, `cargo test --workspace` green.
+- **2026-10-10. M6 History, settings, state, watcher.**
+  - `archalign-repo::watch` (written by a subagent against a fixed contract, then integrated): `classify`, `RepoWatcher` (notify-debouncer-mini 300 ms, FSEvents), `GitRefreshLimiter`.
+  - `archalign-desktop`: `persist` (`state.json`/`settings.json` via `directories`, atomic writes, serde mirror of the pane layout, a 1 s save rate limit driven by state diffs after every update), History strip, Settings modal, the watcher subscription (`watch`), reload and recheck paths, and ⌘R.
+  - Fixed a latent panic: a `tokio::time::sleep` created in `update()` (outside any runtime) panics, so delayed tasks now build their timer inside the async block.
+  - The harness keeps a restored window size and offers `watch(paths)`, which runs real file changes through the real filter.
+  - Screenshots reviewed: `target/smoke/m6/{history,settings,reloaded}.png`.
   - Gates: fmt, clippy `-D warnings`, `cargo test --workspace` green.
