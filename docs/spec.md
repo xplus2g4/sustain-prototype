@@ -321,7 +321,7 @@ ADRs: [0018](adr/0018-app-computed-layout-dugong-and-orthogonal-routing.md), [00
 - **Auto layout:** measure the text through `TextMeasure` (label 14 px, sublabel 12 px, tag 11 px, JetBrains Mono), add 12 px horizontal and 10 px vertical padding, with a minimum of 120×60.
 - AC: With the fixed-advance measurer, the sizes are exact. `[unit]`
 
-**FR-LAY-04 Auto layout.** Use `dugong` as a compound graph, ranked left to right. Boundaries become compound parents, and nesting is allowed.
+**FR-LAY-04 Auto layout.** Use `dugong` as a compound graph, ranked left to right or top to bottom, whichever fits a 16:10 viewport at the larger scale (ties: left to right; [0035](adr/0035-auto-rank-direction.md)). Boundaries become compound parents, and nesting is allowed.
 - AC: Every vendored fixture produces a geometry snapshot. `[snap]`
 
 **FR-LAY-05 Routing.** Every connection is drawn as axis-aligned segments:

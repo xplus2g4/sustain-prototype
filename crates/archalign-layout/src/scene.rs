@@ -8,7 +8,7 @@ use archalign_model::{
 use serde::Serialize;
 
 use crate::boundaries::{boundary_rects, nesting};
-use crate::engine::{DugongEngine, GridFallbackEngine, LayoutEngine, LayoutGraph};
+use crate::engine::{AutoDirectionEngine, GridFallbackEngine, LayoutEngine, LayoutGraph};
 use crate::geom::{Point, Rect, bounding_box};
 use crate::measure::{TextMeasure, auto_node_size};
 use crate::mode::{Mode, select_mode};
@@ -98,7 +98,7 @@ impl Scene {
 
 /// Lays out a document with the default engine (dagre via dugong, with a grid fallback).
 pub fn layout_document(doc: &ArchitectureDoc, measure: &dyn TextMeasure) -> Scene {
-    layout_with(doc, measure, &DugongEngine::default())
+    layout_with(doc, measure, &AutoDirectionEngine::default())
 }
 
 /// Lays out a document with a specific placement engine.
@@ -140,7 +140,7 @@ pub fn layout_with(
                 .iter()
                 .flatten()
                 .map(|[x, y]| Point::new(x.get(), y.get()))
-                .filter(|p| p.x.is_finite() && p.y.is_finite())
+                .filter(|p| crate::geom::sane(p.x) && crate::geom::sane(p.y))
                 .collect()
         } else {
             Vec::new()

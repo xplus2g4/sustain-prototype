@@ -276,8 +276,8 @@ async fn conversation(
         }
         let response = response.map_err(|e| llm_failure(&e, &b))?;
         let usage: Usage = response.usage;
-        input_total += usage.input_tokens;
-        output_total += usage.output_tokens;
+        input_total = input_total.saturating_add(usage.input_tokens);
+        output_total = output_total.saturating_add(usage.output_tokens);
         log.turn(turn, usage, response.tool_calls.len());
         sink.emit(AgentEvent::Usage {
             n: turn,

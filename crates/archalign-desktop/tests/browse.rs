@@ -432,3 +432,22 @@ fn reads_are_confined_to_the_root() {
     }
     assert!(!h.has_text("TOP SECRET"));
 }
+
+/// NFR-QUAL-04: revealing a path under a folder that can't be listed (a stale citation)
+/// stops after one error instead of re-listing forever.
+#[test]
+fn revealing_under_a_missing_folder_stops_after_one_error() {
+    let repo = common::fixtures::sample_repo();
+    let mut h = Harness::new(Boot::default());
+    h.send(Message::OpenRepo(repo.root.clone()));
+    let t = h.app.reveal("README.md/inner/x.rs".parse().unwrap());
+    h.run_task(t);
+    assert_eq!(h.app.tree.pending_reveal, None);
+    let errors = h
+        .app
+        .banners
+        .iter()
+        .filter(|b| b.text.starts_with("Can't list"))
+        .count();
+    assert_eq!(errors, 1, "{:?}", h.app.banners);
+}

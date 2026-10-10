@@ -46,8 +46,7 @@ fn live_archify_one_repo() {
     let model =
         std::env::var("ARCHALIGN_LIVE_MODEL").unwrap_or_else(|_| "openai/gpt-6-luna".into());
     let focus = std::env::var("ARCHALIGN_LIVE_FOCUS").unwrap_or_default();
-    let name = repo.file_name().unwrap().to_string_lossy().to_string();
-    let shots = common::smoke_dir(&name);
+    let shots = shots_dir(&repo);
     let provider = model
         .split_once('/')
         .map(|(p, _)| p)
@@ -105,7 +104,75 @@ fn live_archify_one_repo() {
         "{:?}",
         h.app.banners
     );
-    let d = h.app.diagram.loaded().expect("diagram opened").clone();
+    let rel = h.app.diagram.loaded().expect("diagram opened").rel.clone();
+    assert!(
+        repo.join(rel.parent().unwrap().as_str())
+            .join("run.jsonl")
+            .is_file()
+    );
+    drop(h);
+    verify_newest(&repo, &shots, Some(rel), false);
+}
+
+/// Re-lays out the newest diagram of an already-smoked repo (no LLM call), then repeats the
+/// reopen-and-click check. Used after a layout change, so the saved smoke diagrams pick it up:
+///
+/// ```text
+/// ARCHALIGN_SMOKE_RELAYOUT_REPO=.smoke_repo/HyperTrack \
+///   cargo test -p archalign-desktop --release --test live -- --ignored --nocapture smoke_relayout
+/// ```
+#[test]
+#[ignore = "rewrites a smoke repo's newest diagram; needs ARCHALIGN_SMOKE_RELAYOUT_REPO"]
+fn smoke_relayout_newest() {
+    let Ok(repo_arg) = std::env::var("ARCHALIGN_SMOKE_RELAYOUT_REPO") else {
+        eprintln!("skipped: set ARCHALIGN_SMOKE_RELAYOUT_REPO");
+        return;
+    };
+    let repo = workspace().join(repo_arg).canonicalize().unwrap();
+    let shots = shots_dir(&repo);
+    verify_newest(&repo, &shots, None, true);
+}
+
+fn shots_dir(repo: &Path) -> PathBuf {
+    let name = repo.file_name().unwrap().to_string_lossy().to_string();
+    // `target/smoke/archify-src` is itself the repo copy: keep screenshots out of its tree.
+    let shots = common::smoke_dir(&name);
+    if shots.canonicalize().ok().as_deref() == Some(repo) {
+        shots.join(".archalign-smoke")
+    } else {
+        shots
+    }
+}
+
+/// Opens `repo` in a fresh app (the newest valid diagram opens on import), optionally
+/// re-lays it out, screenshots it, and clicks 3 nodes with sources, checking path and band.
+fn verify_newest(
+    repo: &Path,
+    shots: &Path,
+    expect: Option<archalign_repo::RelPath>,
+    relayout: bool,
+) {
+    let mut h = Harness::new(Boot::default());
+    h.send(Message::OpenRepo(repo.to_path_buf()));
+    let rel = h
+        .app
+        .diagram
+        .loaded()
+        .expect("diagram reopened")
+        .rel
+        .clone();
+    if let Some(e) = expect {
+        assert_eq!(rel, e, "the new diagram is the newest valid one");
+    }
+    if relayout {
+        h.click(ids::RELAYOUT);
+        assert_eq!(
+            h.app.diagram.loaded().map(|d| d.rel.clone()),
+            Some(rel.clone())
+        );
+        println!("re-laid out {rel}");
+    }
+    let d = h.app.diagram.loaded().expect("diagram open").clone();
     assert!(
         d.doc
             .components
@@ -116,6 +183,7 @@ fn live_archify_one_repo() {
     let c = h.bounds(ids::DIAGRAM_CANVAS).unwrap();
     h.move_to(Point::new(c.x + 1.0, c.y + 1.0));
     h.screenshot(&shots.join("diagram.png"));
+    println!("screenshots: {}", shots.display());
     // Click 3 nodes with sources and check the path and band.
     let mut clicked = 0;
     for n in d.scene.nodes.iter() {

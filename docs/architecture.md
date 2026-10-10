@@ -102,7 +102,8 @@ The type names below are the intended public surface. The implementer may refine
 - `measure::auto_node_size` stacks label (14 px), sublabel (12 px) and tag (11 px), adds 12/10 px padding, applies the 120×60 minimum and rounds up to whole pixels.
 
 **`LayoutEngine`.** `fn place(&self, graph: &LayoutGraph) -> Result<Placement, LayoutError>` ([0031](adr/0031-dugong-placement-and-grid-astar-router.md)).
-- `DugongEngine` builds a compound dagre graph: components are nodes, a component's innermost boundary is its parent, boundaries nest, ranks run left to right, self-loops are left out. Panics are caught.
+- `DugongEngine` builds a compound dagre graph: components are nodes, a component's innermost boundary is its parent, boundaries nest, ranks run in its `RankDirection`, self-loops are left out. Panics are caught.
+- `AutoDirectionEngine` (the default) places left to right and top to bottom and keeps the usable placement that fits a 16:10 reference viewport at the larger scale; ties keep left to right ([0035](adr/0035-auto-rank-direction.md)).
 - `GridFallbackEngine` is used when dugong fails or returns overlapping boxes.
 
 **Modes (`mode`).** Authored when every component has `pos`, or a grid cell in grid mode (Archify's formula; `pos` wins; default size 120×60). Otherwise auto, with a `PartialPositions` warning when some positions were ignored (FR-LAY-01..03).

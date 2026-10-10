@@ -48,15 +48,15 @@ pub fn visible_rows(scroll: ScrollState, row_h: f32, total: usize) -> Range<usiz
         return 0..0;
     }
     let first = (scroll.offset_y.max(0.0) / row_h).floor() as usize;
-    let count = (scroll.viewport_h.max(0.0) / row_h).ceil() as usize + 1;
+    let count = ((scroll.viewport_h.max(0.0) / row_h).ceil() as usize).saturating_add(1);
     let first = first.min(total);
-    first..(first + count).min(total)
+    first..first.saturating_add(count).min(total)
 }
 
 /// Rows to build: the visible rows plus overscan on each side.
 pub fn window(scroll: ScrollState, row_h: f32, total: usize) -> Range<usize> {
     let v = visible_rows(scroll, row_h, total);
-    v.start.saturating_sub(OVERSCAN)..(v.end + OVERSCAN).min(total)
+    v.start.saturating_sub(OVERSCAN)..v.end.saturating_add(OVERSCAN).min(total)
 }
 
 /// Offset that puts `row` at a third of the viewport height (clamped at the top).
@@ -108,5 +108,14 @@ mod tests {
         };
         assert_eq!(offset_to_reveal(2, 20.0, s), 0.0);
         assert_eq!(offset_to_reveal(10, 20.0, s), 120.0);
+    }
+
+    #[test]
+    fn huge_viewports_saturate_instead_of_overflowing() {
+        let s = ScrollState {
+            offset_y: 0.0,
+            viewport_h: 1e21,
+        };
+        assert_eq!(window(s, 22.0, 50), 0..50);
     }
 }

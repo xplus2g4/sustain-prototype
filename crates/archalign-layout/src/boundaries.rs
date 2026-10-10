@@ -129,7 +129,10 @@ pub fn boundary_rects(doc: &ArchitectureDoc, nest: &Nesting, nodes: &[Rect]) -> 
         let Some(inner) = bounding_box(member_rects.chain(child_rects.iter())) else {
             continue;
         };
-        let pad = doc.boundaries()[b].pad.map(|p| p.get());
+        let pad = doc.boundaries()[b]
+            .pad
+            .map(|p| p.get())
+            .filter(|p| crate::geom::sane(*p));
         let (l, t, r, bt) = padding(pad);
         rects[b] = Some(Rect::new(
             inner.x - l,

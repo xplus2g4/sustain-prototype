@@ -61,7 +61,8 @@ Paths and URLs from this brief only.
 | 0028 | [Agent run budgets](0028-agent-run-budgets.md) | Accepted |
 | 0029 | [Testing strategy and live smoke runs](0029-testing-strategy-and-live-smoke-runs.md) | Accepted |
 | 0030 | [Long-running implementation process](0030-long-running-implementation-process.md) | Accepted |
-| 0031 | [dugong placement plus one grid A* orthogonal router](0031-dugong-placement-and-grid-astar-router.md) | Accepted |
+| 0031 | [dugong placement plus one grid A* orthogonal router](0031-dugong-placement-and-grid-astar-router.md) | Accepted; rank direction superseded by 0035 |
 | 0032 | [UI test harness built on `iced_test` parts](0032-ui-test-harness-on-iced-test-parts.md) | Accepted (refines the desktop part of 0029) |
 | 0033 | [`Retry-After` from error bodies for litellm-rust providers](0033-retry-after-from-error-bodies-for-litellm-providers.md) | Accepted (refines 0021) |
 | 0034 | [OpenAI models through the Responses API](0034-openai-via-responses-api.md) | Accepted (supersedes 0021 for `openai/`) |
+| 0035 | [Rank direction chosen per diagram: left to right or top to bottom](0035-auto-rank-direction.md) | Accepted (supersedes 0031's direction) |

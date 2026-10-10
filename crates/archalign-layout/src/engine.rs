@@ -1,11 +1,11 @@
-//! Node placement engines behind [`LayoutEngine`] (ADR 0018).
+//! Node placement engines behind [`LayoutEngine`] (ADR 0031, ADR 0035).
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use dugong::graphlib::{Graph, GraphOptions};
 use dugong::{EdgeLabel, GraphLabel, NodeLabel, RankDir};
 
-use crate::geom::{Point, Size};
+use crate::geom::{Point, Rect, Size};
 
 /// A compound graph to place: nodes with sizes, clusters (boundaries) with parents.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -44,12 +44,24 @@ pub trait LayoutEngine {
     fn place(&self, graph: &LayoutGraph) -> Result<Placement, LayoutError>;
 }
 
-/// Dagre (via `dugong`) as a compound graph ranked left to right.
+/// The direction ranks advance in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RankDirection {
+    /// Ranks are columns, left to right.
+    #[default]
+    LeftToRight,
+    /// Ranks are rows, top to bottom.
+    TopToBottom,
+}
+
+/// Dagre (via `dugong`) as a compound graph ranked in one direction.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DugongEngine {
-    /// Separation between nodes in the same rank (vertical, in LR).
+    /// Rank direction.
+    pub direction: RankDirection,
+    /// Separation between nodes in the same rank.
     pub nodesep: f64,
-    /// Separation between ranks (horizontal, in LR).
+    /// Separation between ranks.
     pub ranksep: f64,
     /// Separation between edges.
     pub edgesep: f64,
@@ -58,11 +70,91 @@ pub struct DugongEngine {
 impl Default for DugongEngine {
     fn default() -> Self {
         Self {
+            direction: RankDirection::LeftToRight,
             nodesep: 60.0,
             ranksep: 110.0,
             edgesep: 20.0,
         }
     }
+}
+
+/// The reference viewport for choosing a direction: 16:10, like the default window.
+pub const REFERENCE_VIEWPORT: Size = Size {
+    w: 1600.0,
+    h: 1000.0,
+};
+
+/// FR-LAY-04 (ADR 0035): places the graph left to right and top to bottom, and keeps the
+/// placement whose node bounding box fits [`REFERENCE_VIEWPORT`] at the larger scale.
+/// Ties, and graphs where only one direction yields a usable placement, keep that one;
+/// left to right wins ties.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct AutoDirectionEngine {
+    /// Spacing shared by both directions (`direction` is ignored).
+    pub base: DugongEngine,
+}
+
+impl AutoDirectionEngine {
+    /// Places in one direction and keeps the result only if it is usable (every node
+    /// placed, no overlaps).
+    fn try_place(&self, lg: &LayoutGraph, direction: RankDirection) -> Option<Placement> {
+        let engine = DugongEngine {
+            direction,
+            ..self.base
+        };
+        engine
+            .place(lg)
+            .ok()
+            .filter(|p| p.centers.len() == lg.nodes.len() && !overlapping(p, &lg.nodes))
+    }
+}
+
+impl LayoutEngine for AutoDirectionEngine {
+    fn place(&self, lg: &LayoutGraph) -> Result<Placement, LayoutError> {
+        let lr = self.try_place(lg, RankDirection::LeftToRight);
+        let tb = self.try_place(lg, RankDirection::TopToBottom);
+        match (lr, tb) {
+            (Some(a), Some(b)) => {
+                if fit_scale(&b, &lg.nodes) > fit_scale(&a, &lg.nodes) * (1.0 + 1e-9) {
+                    Ok(b)
+                } else {
+                    Ok(a)
+                }
+            }
+            (Some(a), None) => Ok(a),
+            (None, Some(b)) => Ok(b),
+            (None, None) => Err(LayoutError::Unusable),
+        }
+    }
+}
+
+fn node_rects<'a>(p: &'a Placement, sizes: &'a [Size]) -> impl Iterator<Item = Rect> + 'a {
+    p.centers
+        .iter()
+        .zip(sizes)
+        .map(|(c, s)| Rect::new(c.x - s.w / 2.0, c.y - s.h / 2.0, s.w, s.h))
+}
+
+fn overlapping(p: &Placement, sizes: &[Size]) -> bool {
+    let rects: Vec<Rect> = node_rects(p, sizes).collect();
+    (0..rects.len()).any(|i| ((i + 1)..rects.len()).any(|j| rects[i].overlaps(&rects[j])))
+}
+
+/// The scale at which the placement's node bounding box fits [`REFERENCE_VIEWPORT`].
+pub fn fit_scale(p: &Placement, sizes: &[Size]) -> f64 {
+    let mut it = node_rects(p, sizes);
+    let Some(first) = it.next() else {
+        return f64::INFINITY;
+    };
+    let (mut x0, mut y0, mut x1, mut y1) = (first.x, first.y, first.x + first.w, first.y + first.h);
+    for r in it {
+        x0 = x0.min(r.x);
+        y0 = y0.min(r.y);
+        x1 = x1.max(r.x + r.w);
+        y1 = y1.max(r.y + r.h);
+    }
+    let (w, h) = ((x1 - x0).max(1.0), (y1 - y0).max(1.0));
+    (REFERENCE_VIEWPORT.w / w).min(REFERENCE_VIEWPORT.h / h)
 }
 
 fn node_id(i: usize) -> String {
@@ -86,7 +178,10 @@ impl LayoutEngine for DugongEngine {
             ..Default::default()
         });
         g.set_graph(GraphLabel {
-            rankdir: RankDir::LR,
+            rankdir: match self.direction {
+                RankDirection::LeftToRight => RankDir::LR,
+                RankDirection::TopToBottom => RankDir::TB,
+            },
             nodesep: self.nodesep,
             ranksep: self.ranksep,
             edgesep: self.edgesep,

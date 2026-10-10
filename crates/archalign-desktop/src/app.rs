@@ -746,6 +746,16 @@ impl App {
                     }
                     Err(e) => {
                         self.tree.expanded.remove(&dir);
+                        // A reveal through a folder that can't be listed stops here instead
+                        // of retrying forever (NFR-QUAL-04).
+                        if self
+                            .tree
+                            .pending_reveal
+                            .as_ref()
+                            .is_some_and(|t| TreeState::ancestors(t).contains(&dir))
+                        {
+                            self.tree.pending_reveal = None;
+                        }
                         self.tree.errors.insert(dir.clone(), e.clone());
                         self.banner(
                             Some(PaneKind::Tree),

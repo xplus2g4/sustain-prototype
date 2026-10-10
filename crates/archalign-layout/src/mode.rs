@@ -89,7 +89,11 @@ pub fn authored_rect(c: &Component, grid: Option<&Grid>) -> Option<Rect> {
         .size
         .map(|[w, h]| [w.get(), h.get()])
         .unwrap_or([DEFAULT_AUTHORED.w, DEFAULT_AUTHORED.h]);
-    Some(Rect::new(pos.x, pos.y, w, h))
+    // Out-of-range geometry counts as missing (NFR-QUAL-04).
+    [pos.x, pos.y, w, h]
+        .into_iter()
+        .all(crate::geom::sane)
+        .then(|| Rect::new(pos.x, pos.y, w, h))
 }
 
 /// Chooses the layout mode (FR-LAY-01).

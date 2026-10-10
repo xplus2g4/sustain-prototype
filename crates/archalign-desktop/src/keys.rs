@@ -80,8 +80,15 @@ impl KeyEnv {
 }
 
 fn from_dotenv(path: &Path, var: &str) -> Option<String> {
+    // Only regular files: a folder named `.env` (a Python virtualenv) or a FIFO would make
+    // the reader return errors forever or block (NFR-QUAL-04).
+    if !path.metadata().is_ok_and(|m| m.is_file()) {
+        return None;
+    }
     let iter = dotenvy::from_path_iter(path).ok()?;
-    iter.filter_map(Result::ok)
+    // Malformed lines are skipped; an I/O error ends the lookup.
+    iter.take_while(|r| !matches!(r, Err(dotenvy::Error::Io(..))))
+        .filter_map(Result::ok)
         .find(|(k, _)| k == var)
         .map(|(_, v)| v)
         .filter(|v| !v.trim().is_empty())
@@ -170,5 +177,20 @@ mod tests {
         let k = ApiKey("sk-secret-123".into());
         assert_eq!(format!("{k:?}"), "ApiKey(<redacted>)");
         assert!(!format!("{:?}", Some(k)).contains("sk-secret"));
+    }
+
+    /// A Python virtualenv named `.env` (a folder) used to make the lookup loop forever.
+    #[test]
+    fn a_folder_named_env_is_skipped() {
+        let launch = tempfile::tempdir().unwrap();
+        let config = tempfile::tempdir().unwrap();
+        std::fs::create_dir(launch.path().join(".env")).unwrap();
+        std::fs::write(config.path().join(".env"), "OPENAI_API_KEY=from-config\n").unwrap();
+        let (src, key) = resolve(
+            &env(vec![], Some(launch.path()), Some(config.path())),
+            "OPENAI_API_KEY",
+        );
+        assert_eq!(src, KeySource::DotEnv(config.path().join(".env")));
+        assert_eq!(key.unwrap().expose(), "from-config");
     }
 }

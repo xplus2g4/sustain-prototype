@@ -305,9 +305,7 @@ pub fn parse_state(bytes: &[u8]) -> Result<Loaded<AppState>, String> {
     };
     let window = raw
         .window
-        .filter(|w| {
-            w.width.is_finite() && w.height.is_finite() && w.width >= 400.0 && w.height >= 300.0
-        })
+        .filter(|w| (400.0..=16384.0).contains(&w.width) && (300.0..=16384.0).contains(&w.height))
         .unwrap_or_default();
     let mut recent_repos = raw.recent_repos;
     recent_repos.truncate(MAX_RECENTS);

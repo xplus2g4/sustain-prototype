@@ -110,8 +110,8 @@ impl RunLog {
     /// `turn`.
     pub fn turn(&mut self, n: u32, usage: Usage, tool_calls: usize) {
         self.turns = n;
-        self.input_tokens += usage.input_tokens;
-        self.output_tokens += usage.output_tokens;
+        self.input_tokens = self.input_tokens.saturating_add(usage.input_tokens);
+        self.output_tokens = self.output_tokens.saturating_add(usage.output_tokens);
         self.write(
             "turn",
             json!({

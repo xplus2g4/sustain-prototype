@@ -51,7 +51,7 @@ How to use this file ([spec §11–§13](spec.md#11-milestones), [0030](adr/0030
 - [x] FR-LAY-06 Boundaries. Evidence: `boundary_uses_pad_on_every_side`, `boundary_default_padding_is_30_sides_50_bottom`, `nested_boundary_sits_inside_its_parent`.
 - [x] FR-LAY-07 Invariants for auto layouts. Evidence: `tests/invariants.rs::auto_layout_invariants_hold` (proptest, ≤60 nodes, ≤120 edges incl. self-loops and multi-edges, 2-level boundaries; 64 cases by default, plus 2,400 cases run with `PROPTEST_CASES=600/800` in release, all passing); `every_fixture_satisfies_invariants_when_auto_laid_out`.
 - [x] FR-LAY-08 Write-back. Evidence: `write_back_sets_integer_pos_and_size_and_nothing_else` (integer pos/size, other fields unchanged, `layout_document` leaves the document untouched, reopens as authored with identical boxes). The app-level "opening never writes" check is repeated in M4 when the open path exists.
-- [x] NFR-PERF-03 Layout and routing of 60 nodes < 100 ms. Evidence: `cargo test --workspace --release -- --ignored perf_` → `perf_layout_and_routing_of_60_nodes_under_100ms`: median of 7 = 13.4 ms (max 21.7 ms), 120 edges.
+- [x] NFR-PERF-03 Layout and routing of 60 nodes < 100 ms. Evidence: `cargo test --workspace --release -- --ignored perf_` → `perf_layout_and_routing_of_60_nodes_under_100ms`: median of 7 = 13.4 ms (max 21.7 ms), 120 edges. Since ADR 0035 (M7), both rank directions are placed: 31.6 ms.
 
 ## M3 App shell
 
@@ -159,12 +159,33 @@ How to use this file ([spec §11–§13](spec.md#11-milestones), [0030](adr/0030
 
 ## M7 Finish
 
-- [ ] NFR-QUAL-04: audit that user data never causes a panic (repositories, diagram files, state files).
-- [ ] All NFR-PERF tests pass: `cargo test --workspace --release -- --ignored perf_`.
-- [ ] Final live smoke with Sol: HyperTrack (attempts 0 / 3), cs2103-ip (attempts 0 / 3), `target/smoke/archify-src` copy (attempts 0 / 3).
-- [ ] FR-STO-03 `[live]`: Archify CLI check on one generated `candidate.json`. Record the result.
-- [ ] Simulator screenshots saved under `target/smoke/<repo>/` and reviewed.
-- [ ] `libraries.md`, the ADRs and `architecture.md` match the code.
+- [x] NFR-QUAL-04: audit that user data never causes a panic (repositories, diagram files, state files). A read-only reviewer subagent traced user input to panic sites in all `src/` code. Its 7 findings are fixed, each with a regression test:
+  1. `pos`/`size`/`pad`/`via` beyond `f32` range made NaN canvas paths, which panic in iced_wgpu's tessellator. Coordinates outside ±1,000,000 (`archalign_layout::geom::MAX_COORD`) or non-finite now count as missing. Test: `layout/tests/layout.rs::out_of_range_geometry_is_ignored_not_fatal`.
+  2. Infinite obstacle edges indexed past the router grid. Non-finite obstacles are now skipped and the indices clamped. Same test.
+  3. A folder or FIFO named `.env` (a Python virtualenv) made the key lookup loop or block on the UI thread. Only regular files are read now, and lookup stops at the first I/O error. Test: `desktop/src/keys.rs::a_folder_named_env_is_skipped`.
+  4. Revealing a citation under a folder that can't be listed re-listed it forever. The reveal is now dropped. Test: `desktop/tests/browse.rs::revealing_under_a_missing_folder_stops_after_one_error`.
+  5. A huge saved window height overflowed `virtual_list` arithmetic in debug builds. The arithmetic now saturates, and saved window sizes are capped at 16,384. Test: `virtual_list.rs::huge_viewports_saturate_instead_of_overflowing`.
+  6. `max_repairs` = `u32::MAX` overflowed. Now saturating. Test: `agent/src/gate.rs::rejection_text_saturates_at_the_largest_repair_budget`.
+  7. Huge LLM usage counts overflowed the token totals. They now saturate (`run.rs`, `runlog.rs`).
+
+  Sites checked and judged safe are listed in the audit output (schema `expect` on embedded constants, ASCII-only slicing, guarded indices, `catch_unwind` around dugong, serde's recursion limit).
+- [x] All NFR-PERF tests pass: `cargo test --workspace --release -- --ignored perf_`. NFR-PERF-01 listing 0.48 ms; NFR-PERF-02 open 2 MB 0.88 ms (repo read + index) and 4.6 ms (with the first highlighted window); NFR-PERF-03 layout + routing of 60 nodes 31.6 ms (two placements since ADR 0035; 14 ms before); NFR-PERF-04 canvas geometry 0.43 ms.
+- [x] Final live smoke with Sol. Every repo passed on the first attempt; no attempt failed.
+
+  | Repo | Attempts | Components / connections | Turns | Time | Input / output tokens |
+  |---|---|---|---|---|---|
+  | HyperTrack | 1 / 3 | 15 / 24 | 7 | 61 s | 121,157 / 3,353 |
+  | cs2103-ip | 1 / 3 | 8 / 14 | 7 | 42 s | 40,318 / 1,899 |
+  | `target/smoke/archify-src` copy | 1 / 3 | 11 / 18 | 8 | 71 s | 199,673 / 3,475 |
+
+  Each candidate passed the gate and was saved with `pos`/`size` and `run.jsonl`. A fresh Simulator reopened it as the newest valid diagram and clicked 3 nodes; path and band matched each time (`live.rs::live_archify_one_repo`). After ADR 0035, the HyperTrack and cs2103-ip diagrams were re-laid out without an LLM call and the clicks were re-verified (`live.rs::smoke_relayout_newest`).
+- [x] FR-STO-03 `[live]`: Archify CLI check on one generated `candidate.json`. Results:
+  - `node archify-src/archify/bin/archify.mjs validate architecture <HyperTrack candidate> --json`: `ok: false` at stage `render`, "This diagram declares source evidence. Pass --repo-root <repository>…".
+  - With `--repo-root .smoke_repo/HyperTrack`: schema, render and every artifact check pass (single_svg, finite_svg, orthogonal_arrows, label_route_clearance, relationship_crossings, relationship_corridors, container_border_runs, route_rhythm, legend_clearance). It still ends `ok: false` on `composition/desktop-readability`, because the viewBox is 1,897 px wide and 8 px edge labels project to 3.9 px (minimum 6).
+  - The same check gives cs2103-ip 1,390 px / 5.4 px and archify-src 2,298 px / 4.7 px.
+  - Raw output: `target/smoke/cli-validate-*.json`.
+- [x] Simulator screenshots saved under `target/smoke/<repo>/` and reviewed: `target/smoke/HyperTrack/{diagram,node-1,node-2,node-3}.png`, `target/smoke/cs2103-ip/{diagram,node-1,node-2,node-3}.png`, `target/smoke/archify-src/.archalign-smoke/{diagram,node-1,node-2,node-3}.png`. The copy is itself the repo, so its screenshots sit in a hidden subfolder.
+- [x] `libraries.md`, the ADRs and `architecture.md` match the code. Every `Cargo.toml` dependency is listed with its real users (`tracing` and `tempfile` rows corrected); ADRs 0033–0035 record the deviations.
 - [ ] Owner's manual check done.
 
 ## Log
@@ -215,3 +236,10 @@ How to use this file ([spec §11–§13](spec.md#11-milestones), [0030](adr/0030
   - The harness keeps a restored window size and offers `watch(paths)`, which runs real file changes through the real filter.
   - Screenshots reviewed: `target/smoke/m6/{history,settings,reloaded}.png`.
   - Gates: fmt, clippy `-D warnings`, `cargo test --workspace` green.
+- **2026-10-10. M7 Finish.**
+  - Final Sol smoke: HyperTrack, cs2103-ip and the `archify-src` copy each succeeded on the first of 3 attempts; 3 node clicks verified per repo after reopening in a fresh Simulator.
+  - The first Sol diagram (15 components ranked left to right, 4,000 px wide) showed no labels when fitted, and Archify's readability check failed. The owner chose automatic rank direction (ADR 0035; FR-LAY-04 amended). 5 fixture snapshots changed and were reviewed (`target/smoke/m7/auto-*.png`); both `.smoke_repo` diagrams were re-laid out and re-verified without new LLM calls.
+  - NFR-QUAL-04 audit (reviewer subagent): 7 findings fixed with regression tests. The reveal loop was reproduced before the fix: the test hung until killed.
+  - Archify CLI: the plain command asks for `--repo-root`. With it, schema, render and all artifact checks pass and `composition/desktop-readability` fails (recorded under M7).
+  - Docs: `libraries.md` used-by rows corrected; `architecture.md` and the ADR index updated.
+  - Gates: fmt, clippy `-D warnings`, `cargo test --workspace`, and release `perf_` all green.

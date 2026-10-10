@@ -465,3 +465,93 @@ fn every_fixture_satisfies_invariants_when_auto_laid_out() {
         }
     }
 }
+
+fn chain_or_fan(n: usize, fan: bool) -> archalign_layout::LayoutGraph {
+    archalign_layout::LayoutGraph {
+        nodes: vec![archalign_layout::Size { w: 160.0, h: 60.0 }; n],
+        node_parent: vec![None; n],
+        cluster_parent: vec![],
+        edges: (1..n)
+            .map(|i| if fan { (0, i) } else { (i - 1, i) })
+            .collect(),
+    }
+}
+
+fn placed(
+    g: &archalign_layout::LayoutGraph,
+    direction: archalign_layout::RankDirection,
+) -> archalign_layout::Placement {
+    use archalign_layout::LayoutEngine;
+    archalign_layout::DugongEngine {
+        direction,
+        ..Default::default()
+    }
+    .place(g)
+    .unwrap()
+}
+
+/// FR-LAY-04 (ADR 0035): the direction that fits a 16:10 viewport at the larger scale wins.
+#[test]
+fn auto_direction_picks_the_better_fitting_rank_direction() {
+    use archalign_layout::{AutoDirectionEngine, LayoutEngine, fit_scale};
+    let auto = AutoDirectionEngine::default();
+    use archalign_layout::RankDirection::{LeftToRight, TopToBottom};
+    // A 10-node chain is long along its ranks: top to bottom fits better (160×60 boxes).
+    let chain = chain_or_fan(10, false);
+    assert!(
+        fit_scale(&placed(&chain, TopToBottom), &chain.nodes)
+            > fit_scale(&placed(&chain, LeftToRight), &chain.nodes)
+    );
+    assert_eq!(auto.place(&chain).unwrap(), placed(&chain, TopToBottom));
+    // A root with 8 children is wide across its ranks: left to right fits better.
+    let fan = chain_or_fan(9, true);
+    assert!(
+        fit_scale(&placed(&fan, LeftToRight), &fan.nodes)
+            > fit_scale(&placed(&fan, TopToBottom), &fan.nodes)
+    );
+    assert_eq!(auto.place(&fan).unwrap(), placed(&fan, LeftToRight));
+    // A single node is a tie: left to right.
+    let one = chain_or_fan(1, false);
+    assert_eq!(
+        auto.place(&one).unwrap(),
+        archalign_layout::DugongEngine::default()
+            .place(&one)
+            .unwrap()
+    );
+}
+
+/// NFR-QUAL-04: coordinates beyond `MAX_COORD` (or overflowing `f32`) are treated as
+/// missing instead of reaching the router and the canvas.
+#[test]
+fn out_of_range_geometry_is_ignored_not_fatal() {
+    for pos in [json!([1e39, 0]), json!([1e308, 0])] {
+        let v = arch(
+            vec![
+                comp("a", json!({ "pos": pos, "size": [1e308, 100] })),
+                comp("b", json!({ "pos": [300, 40] })),
+            ],
+            json!({
+                "connections": [{ "from": "a", "to": "b", "via": [[1e300, 5]] }],
+                "boundaries": [{ "kind": "region", "label": "G", "wraps": ["a", "b"], "pad": 1e39 }]
+            }),
+        );
+        let s = lay(v);
+        assert_eq!(s.mode, archalign_layout::scene::SceneMode::Auto);
+        assert!(
+            s.warnings
+                .iter()
+                .any(|w| w.code == IssueCode::PartialPositions)
+        );
+        for n in &s.nodes {
+            assert!(
+                [n.rect.x, n.rect.y, n.rect.w, n.rect.h]
+                    .iter()
+                    .all(|v| v.abs() < 1e6)
+            );
+        }
+        for b in &s.boundaries {
+            assert!(b.rect.w < 1e6, "{:?}", b.rect);
+        }
+        assert!(s.bounds.w < 1e6 && s.bounds.h < 1e6);
+    }
+}

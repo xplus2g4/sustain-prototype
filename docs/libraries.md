@@ -34,7 +34,7 @@ This document justifies every direct dependency, dev-dependency and bundled asse
 | `rfd` | `0.17` | defaults | archalign-desktop | Native folder picker (`NSOpenPanel`) | MIT | [0016](adr/0016-local-folder-import-and-git-metadata-via-cli.md) |
 | `directories` | `6.0` | none (crate has no features) | archalign-desktop | OS config directory for app state and settings | MIT OR Apache-2.0 | [0015](adr/0015-diagram-storage-app-state-and-run-log.md) |
 | `dotenvy` | `0.15` | defaults | archalign-desktop | Parse `.env` without mutating the environment | MIT | [0023](adr/0023-api-key-resolution.md) |
-| `tracing` | `0.1` | defaults | all crates | Structured log events and performance spans | MIT | [0024](adr/0024-data-egress-consent-and-network-policy.md) |
+| `tracing` | `0.1` | defaults | archalign-repo, archalign-agent, archalign-desktop | Structured log events and performance spans | MIT | [0024](adr/0024-data-egress-consent-and-network-policy.md) |
 | `tracing-subscriber` | `0.3` | `env-filter` | archalign-desktop | stderr subscriber filtered by `RUST_LOG` | MIT | [0024](adr/0024-data-egress-consent-and-network-policy.md) |
 
 ### Dev-dependencies
@@ -44,7 +44,7 @@ This document justifies every direct dependency, dev-dependency and bundled asse
 | `insta` | `1.49` | `json` | archalign-layout | Layout geometry snapshots | Apache-2.0 | [0029](adr/0029-testing-strategy-and-live-smoke-runs.md) |
 | `proptest` | `1.11` | defaults | archalign-layout | Layout invariant property tests | MIT OR Apache-2.0 | [0029](adr/0029-testing-strategy-and-live-smoke-runs.md) |
 | `iced_test` | `0.14.0` | none (crate has no features) | archalign-desktop | Headless UI `Simulator` | MIT | [0029](adr/0029-testing-strategy-and-live-smoke-runs.md) |
-| `tempfile` | `3.27` | defaults | archalign-repo, archalign-desktop | Temporary repositories in tests | MIT OR Apache-2.0 | [0029](adr/0029-testing-strategy-and-live-smoke-runs.md) |
+| `tempfile` | `3.27` | defaults | archalign-repo, archalign-agent, archalign-desktop | Temporary repositories in tests | MIT OR Apache-2.0 | [0029](adr/0029-testing-strategy-and-live-smoke-runs.md) |
 | `png` | `0.18` | defaults | archalign-desktop | Writes UI-harness screenshots as PNG for visual review | MIT OR Apache-2.0 | [0029](adr/0029-testing-strategy-and-live-smoke-runs.md) |
 
 ### Bundled assets
@@ -268,7 +268,7 @@ This document justifies every direct dependency, dev-dependency and bundled asse
 ### `tracing`
 
 - **Version and features.** `0.1` (resolves to 0.1.44), default features. MSRV 1.65.0.
-- **Used by.** All crates.
+- **Used by.** archalign-repo, archalign-agent and archalign-desktop (the pure crates `archalign-model` and `archalign-layout` log nothing).
 - **Purpose.** Structured log events, and spans around measured operations for performance instrumentation (NFR-PERF).
 - **Why this one.** The standard structured-logging facade in the tokio ecosystem [inference]; spans give timings without a separate profiler.
 - **Alternatives considered.** `log` [inference: no spans].
@@ -323,7 +323,7 @@ All four are dev-dependencies only and do not ship in the binary. Test strategy:
 ### `tempfile`
 
 - **Version and features.** `3.27` (resolves to 3.27.0), default features. MSRV 1.63.
-- **Used by.** archalign-repo and archalign-desktop tests.
+- **Used by.** archalign-repo, archalign-agent and archalign-desktop tests.
 - **Purpose.** Builds temporary repositories for sandbox escapes (`..`, absolute paths, symlinks out), the deny-list, binary detection, caps, `.gitignore`, watcher filtering and self-write suppression.
 - **Why this one.** Directories are removed on drop. Already in the graph through `notify-debouncer-mini`.
 - **Alternatives considered.** Fixture folders checked into the repo [inference: can't express symlinks out of the root portably].

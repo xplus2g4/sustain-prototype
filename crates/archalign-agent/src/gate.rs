@@ -63,7 +63,7 @@ pub fn rejection_text(errors: &[Issue], attempt: u32, max_repairs: u32) -> Strin
         .collect();
     // After rejection `attempt` (1-based), this many further submissions may still be
     // rejected before the run fails.
-    let left = (max_repairs + 1).saturating_sub(attempt);
+    let left = max_repairs.saturating_add(1).saturating_sub(attempt);
     json!({
         "status": "rejected",
         "errors": list,
@@ -71,4 +71,14 @@ pub fn rejection_text(errors: &[Issue], attempt: u32, max_repairs: u32) -> Strin
         "hint": "Fix exactly these errors and submit the complete diagram again."
     })
     .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn rejection_text_saturates_at_the_largest_repair_budget() {
+        let text = super::rejection_text(&[], 1, u32::MAX);
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(v["repairs_left"], u32::MAX - 1);
+    }
 }

@@ -1,6 +1,6 @@
 # 0031. dugong placement plus one grid A* orthogonal router
 
-- Status: Accepted
+- Status: Accepted; the rank direction is superseded by [0035](0035-auto-rank-direction.md)
 - Date: 2026-10-10
 - Supersedes: [0018](0018-app-computed-layout-dugong-and-orthogonal-routing.md)
 - Related: [0010](0010-fonts-text-measurement-and-palette.md), [0019](0019-geometry-write-back-and-authored-layouts.md), [0029](0029-testing-strategy-and-live-smoke-runs.md); spec: FR-LAY, NFR-PERF-03

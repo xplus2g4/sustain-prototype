@@ -14,7 +14,8 @@ pub mod route;
 pub mod scene;
 
 pub use engine::{
-    DugongEngine, GridFallbackEngine, LayoutEngine, LayoutError, LayoutGraph, Placement,
+    AutoDirectionEngine, DugongEngine, GridFallbackEngine, LayoutEngine, LayoutError, LayoutGraph,
+    Placement, REFERENCE_VIEWPORT, RankDirection, fit_scale,
 };
 pub use geom::{Point, Rect, Size};
 pub use measure::{FixedAdvance, TextMeasure};

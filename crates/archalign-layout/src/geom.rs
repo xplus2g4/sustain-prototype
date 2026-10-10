@@ -125,3 +125,12 @@ impl Rect {
 pub fn bounding_box<'a>(rects: impl IntoIterator<Item = &'a Rect>) -> Option<Rect> {
     rects.into_iter().copied().reduce(|a, b| a.union(&b))
 }
+
+/// Largest coordinate magnitude taken from a file (NFR-QUAL-04). Larger or non-finite
+/// values are treated as missing, so geometry stays finite in `f32` at any zoom.
+pub const MAX_COORD: f64 = 1_000_000.0;
+
+/// Whether a coordinate read from a file is usable (see [`MAX_COORD`]).
+pub fn sane(v: f64) -> bool {
+    v.is_finite() && v.abs() <= MAX_COORD
+}

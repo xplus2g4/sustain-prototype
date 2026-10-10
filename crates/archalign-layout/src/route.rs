@@ -305,8 +305,17 @@ impl Grid {
         let mut vblock = vec![false; nx * ny.saturating_sub(1)];
         let idx = |v: &[f64], x: f64| v.partition_point(|&a| a < x - 1e-6);
         for r in obstacles {
-            let (x0, x1) = (idx(&xs, r.x), idx(&xs, r.right()));
-            let (y0, y1) = (idx(&ys, r.y), idx(&ys, r.bottom()));
+            if ![r.x, r.right(), r.y, r.bottom()]
+                .iter()
+                .all(|v| v.is_finite())
+            {
+                continue;
+            }
+            let (x0, x1) = (idx(&xs, r.x), idx(&xs, r.right()).min(nx.saturating_sub(1)));
+            let (y0, y1) = (
+                idx(&ys, r.y),
+                idx(&ys, r.bottom()).min(ny.saturating_sub(1)),
+            );
             // Rows strictly inside, columns spanning.
             for j in (y0 + 1)..y1 {
                 for i in x0..x1 {
